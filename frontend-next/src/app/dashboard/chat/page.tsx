@@ -34,9 +34,9 @@ export default function ChatPage() {
     
     // If no current conversation, create one
     if (!currentConvoId && newMessages.length > 0) {
-      const newConvo = createConversation()
+      const title = newMessages[0]?.content?.slice(0, 30) + '...' || 'New Chat'
+      const newConvo = createConversation(title)
       newConvo.messages = newMessages
-      newConvo.title = newMessages[0]?.content?.slice(0, 30) + '...' || 'New Chat'
       setConversations(prev => [newConvo, ...prev])
       setCurrentConvoId(newConvo.id)
     } else if (currentConvoId) {
@@ -62,7 +62,7 @@ export default function ChatPage() {
   }
 
   const handleNewChat = () => {
-    const newConvo = createConversation()
+    const newConvo = createConversation('New Chat')
     setConversations(prev => [newConvo, ...prev])
     setCurrentConvoId(newConvo.id)
     setMessages([])
