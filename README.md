@@ -24,3 +24,4 @@ Monetizable AI clone of calisthenics coach Jacob Hanif with retrieval-augmented 
 ## Notes
 - You can change `EBOOKS_DIR`, `EBOOK_GLOB`, and `CHROMA_DIR` in `.env`.
 - If you want a different embeddings provider, update `backend/app/rag/vector_store.py`.
+# Trigger deploy
