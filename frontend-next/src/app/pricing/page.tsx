@@ -1,14 +1,14 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
-import { Dumbbell, Shield, Check, Loader2 } from 'lucide-react'
+import { Dumbbell, Check, Loader2 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 
-export default function PricingPage() {
+function PricingContent() {
   const [loading, setLoading] = useState<'monthly' | 'yearly' | null>(null)
   const router = useRouter()
   const searchParams = useSearchParams()
@@ -189,5 +189,13 @@ export default function PricingPage() {
         </div>
       </div>
     </div>
+  )
+}
+
+export default function PricingPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading...</div>}>
+      <PricingContent />
+    </Suspense>
   )
 }

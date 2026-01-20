@@ -239,11 +239,11 @@ export function CoachSidebar({
                     <>
                       <div className="flex justify-between">
                         <span>Readiness</span>
-                        <span>{(ouraHistory as { averages: Record<string, unknown> }).averages.readiness_avg_7d || "-"}</span>
+                        <span>{String((ouraHistory as { averages: Record<string, unknown> }).averages.readiness_avg_7d ?? "-")}</span>
                       </div>
                       <div className="flex justify-between">
                         <span>Sleep</span>
-                        <span>{(ouraHistory as { averages: Record<string, unknown> }).averages.sleep_avg_7d || "-"}</span>
+                        <span>{String((ouraHistory as { averages: Record<string, unknown> }).averages.sleep_avg_7d ?? "-")}</span>
                       </div>
                       <div className="flex justify-between">
                         <span>HRV Trend</span>
