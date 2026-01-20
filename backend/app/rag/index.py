@@ -5,8 +5,8 @@ from pathlib import Path
 from langchain_community.document_loaders import Docx2txtLoader, PyPDFLoader, TextLoader
 from langchain_text_splitters import RecursiveCharacterTextSplitter
 
-from backend.app.core.config import settings
-from backend.app.rag.vector_store import get_embeddings
+from app.core.config import settings
+from app.rag.vector_store import get_embeddings
 
 
 def _iter_files(root: Path, patterns: list[str]) -> list[Path]:

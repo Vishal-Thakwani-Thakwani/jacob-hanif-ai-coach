@@ -7,8 +7,9 @@ import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Avatar } from "@/components/ui/avatar";
 import { Card } from "@/components/ui/card";
-import { sendMessage, OuraData } from "@/lib/api";
+import { streamMessage, OuraData } from "@/lib/api";
 import { Message } from "@/lib/conversations";
+import { createClient } from "@/lib/supabase/client";
 import ReactMarkdown from "react-markdown";
 
 interface ChatInterfaceProps {
@@ -16,25 +17,29 @@ interface ChatInterfaceProps {
   messages: Message[];
   onMessagesChange: (messages: Message[]) => void;
   onFirstMessage?: (title: string) => void;
+  conversationId?: string;
 }
 
 export function ChatInterface({ 
   ouraData, 
   messages, 
   onMessagesChange,
-  onFirstMessage 
+  onFirstMessage,
+  conversationId 
 }: ChatInterfaceProps) {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [streamingContent, setStreamingContent] = useState("");
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [imageType, setImageType] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const supabase = createClient();
 
-  // Auto-scroll to bottom when messages change
+  // Auto-scroll to bottom when messages change or streaming content updates
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+  }, [messages, streamingContent]);
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -75,21 +80,37 @@ export function ChatInterface({
 
     const updatedMessages = [...messages, userMessage];
     onMessagesChange(updatedMessages);
+    const messageContent = input;
     setInput("");
     setIsLoading(true);
+    setStreamingContent("");
 
     try {
-      const response = await sendMessage(
-        input,
-        selectedImage || undefined,
-        imageType || undefined,
-        ouraData || undefined
-      );
+      // Get access token from Supabase session
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!session?.access_token) {
+        throw new Error("Not authenticated. Please sign in again.");
+      }
 
+      // Stream the response
+      let fullContent = "";
+      for await (const token of streamMessage(
+        messageContent,
+        session.access_token,
+        conversationId,
+        selectedImage || undefined,
+        imageType || undefined
+      )) {
+        fullContent += token;
+        setStreamingContent(fullContent);
+      }
+
+      // Add the complete assistant message
       onMessagesChange([
         ...updatedMessages,
-        { role: "assistant", content: response },
+        { role: "assistant", content: fullContent },
       ]);
+      setStreamingContent("");
     } catch (error) {
       onMessagesChange([
         ...updatedMessages,
@@ -98,6 +119,7 @@ export function ChatInterface({
           content: `Error: ${error instanceof Error ? error.message : "Failed to get response"}`,
         },
       ]);
+      setStreamingContent("");
     } finally {
       setIsLoading(false);
       removeImage();
@@ -209,8 +231,15 @@ export function ChatInterface({
                     className="w-full h-full object-cover"
                   />
                 </Avatar>
-                <Card className="p-4 bg-muted">
-                  <Loader2 className="w-5 h-5 animate-spin" />
+                <Card className="max-w-[80%] p-4 bg-muted">
+                  {streamingContent ? (
+                    <div className="prose prose-sm dark:prose-invert max-w-none">
+                      <ReactMarkdown>{streamingContent}</ReactMarkdown>
+                      <span className="inline-block w-2 h-4 bg-primary animate-pulse ml-1" />
+                    </div>
+                  ) : (
+                    <Loader2 className="w-5 h-5 animate-spin" />
+                  )}
                 </Card>
               </div>
             )}

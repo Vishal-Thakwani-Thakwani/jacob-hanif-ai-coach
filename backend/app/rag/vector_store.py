@@ -5,7 +5,7 @@ from pathlib import Path
 from langchain_community.vectorstores import Chroma
 from langchain_openai import OpenAIEmbeddings
 
-from backend.app.core.config import settings
+from app.core.config import settings
 
 
 def get_embeddings() -> OpenAIEmbeddings:

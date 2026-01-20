@@ -6,7 +6,7 @@ from jose import jwt, JWTError
 from typing import Optional
 from supabase import create_client, Client
 
-from backend.app.core.config import settings
+from app.core.config import settings
 
 ALGORITHM = "HS256"
 

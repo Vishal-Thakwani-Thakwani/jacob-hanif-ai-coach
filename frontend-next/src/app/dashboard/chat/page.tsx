@@ -144,6 +144,7 @@ export default function ChatPage() {
           messages={messages}
           onMessagesChange={handleMessagesChange}
           onFirstMessage={handleFirstMessage}
+          conversationId={currentConvoId || undefined}
         />
       </div>
     </div>

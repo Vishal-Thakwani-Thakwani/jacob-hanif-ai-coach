@@ -1,0 +1,23 @@
+# Environment files
+.env
+.env.local
+*.env
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+venv/
+.venv/
+
+# Original ebooks (copyrighted - do not commit)
+data/ebooks/
+
+# SQLite user data (local only)
+data/user_metrics.db
+
+# IDE
+.idea/
+.vscode/
+

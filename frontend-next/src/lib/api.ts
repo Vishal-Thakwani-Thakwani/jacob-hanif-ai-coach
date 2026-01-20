@@ -45,6 +45,72 @@ export interface ProgressSummary {
   };
 }
 
+/**
+ * Stream chat response from backend using SSE
+ */
+export async function* streamMessage(
+  message: string,
+  accessToken: string,
+  conversationId?: string,
+  imageB64?: string,
+  imageType?: string
+): AsyncGenerator<string, void, unknown> {
+  const response = await fetch(`${BACKEND_URL}/chat/stream`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify({
+      message,
+      conversation_id: conversationId,
+      image_b64: imageB64,
+      image_type: imageType,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Chat failed: ${response.status} - ${errorText}`);
+  }
+
+  const reader = response.body?.getReader();
+  if (!reader) throw new Error("No response body");
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+
+    buffer += decoder.decode(value, { stream: true });
+    const lines = buffer.split("\n");
+    buffer = lines.pop() || "";
+
+    for (const line of lines) {
+      if (line.startsWith("data: ")) {
+        const data = line.slice(6);
+        if (data === "[DONE]") return;
+        
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed.token) {
+            yield parsed.token;
+          } else if (parsed.error) {
+            throw new Error(parsed.error);
+          }
+        } catch {
+          // Skip non-JSON lines
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Non-streaming fallback for simpler use cases
+ */
 export async function sendMessage(
   message: string,
   imageB64?: string,

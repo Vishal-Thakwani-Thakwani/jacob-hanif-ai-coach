@@ -9,11 +9,11 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from openai import AsyncOpenAI
 
-from backend.app.core.config import settings
-from backend.app.core.auth import require_subscription, get_supabase
-from backend.app.rag.prompt import SYSTEM_PROMPT, VISION_PROMPT
-from backend.app.rag.vector_store import get_vector_store
-from backend.app.db import database as db
+from app.core.config import settings
+from app.core.auth import require_subscription, get_supabase
+from app.rag.prompt import SYSTEM_PROMPT, VISION_PROMPT
+from app.rag.vector_store import get_vector_store
+from app.db import database as db
 
 
 router = APIRouter()

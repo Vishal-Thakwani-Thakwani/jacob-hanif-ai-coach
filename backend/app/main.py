@@ -3,8 +3,8 @@ from __future__ import annotations
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.app.routers.chat import router as chat_router
-from backend.app.routers.integrations import router as integrations_router
+from app.routers.chat import router as chat_router
+from app.routers.integrations import router as integrations_router
 
 
 app = FastAPI(title="Jacob Hanif AI Coach")
