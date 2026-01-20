@@ -1,13 +1,15 @@
-import { stripe } from '@/lib/stripe'
+import { getStripe } from '@/lib/stripe'
 import { createClient } from '@supabase/supabase-js'
 import { headers } from 'next/headers'
 import { NextResponse } from 'next/server'
 
-// Use service role for webhook (no user context, bypasses RLS)
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.SUPABASE_SERVICE_ROLE_KEY!
-)
+// Lazy init Supabase to avoid build errors
+function getSupabase() {
+  return createClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.SUPABASE_SERVICE_ROLE_KEY!
+  )
+}
 
 export async function POST(req: Request) {
   const body = await req.text()
@@ -19,6 +21,7 @@ export async function POST(req: Request) {
   }
   
   let event
+  const stripe = getStripe()
   
   try {
     event = stripe.webhooks.constructEvent(
@@ -30,6 +33,8 @@ export async function POST(req: Request) {
     console.error('Webhook signature verification failed:', err)
     return NextResponse.json({ error: 'Invalid signature' }, { status: 400 })
   }
+  
+  const supabase = getSupabase()
   
   try {
     switch (event.type) {
