@@ -1,0 +1,19 @@
+fastapi
+uvicorn[standard]
+python-dotenv
+pydantic-settings
+
+langchain
+langchain-community
+langchain-text-splitters
+langchain-openai
+chromadb
+pypdf
+docx2txt
+openai
+streamlit
+requests
+
+# Auth & Database
+supabase
+python-jose[cryptography]
