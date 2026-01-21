@@ -14,25 +14,34 @@ export default function ChatPage() {
   const [currentConvoId, setCurrentConvoId] = useState<string | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
   const [isPro, setIsPro] = useState(false)
+  const [isLoadingProfile, setIsLoadingProfile] = useState(true)
   const [subscriptionStatus, setSubscriptionStatus] = useState<string>('free')
   const supabase = createClient()
 
-  // Fetch user subscription status
+  // Fetch user subscription status (with cache bypass)
   useEffect(() => {
     async function fetchSubscriptionStatus() {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (user) {
-        const { data: profile } = await supabase
-          .from('profiles')
-          .select('subscription_status')
-          .eq('id', user.id)
-          .single()
-        
-        if (profile) {
-          const status = profile.subscription_status || 'free'
-          setSubscriptionStatus(status)
-          setIsPro(status === 'active' || status === 'past_due')
+      setIsLoadingProfile(true)
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user) {
+          const { data: profile, error } = await supabase
+            .from('profiles')
+            .select('subscription_status')
+            .eq('id', user.id)
+            .single()
+          
+          console.log('Profile fetched:', profile, 'Error:', error)
+          
+          if (profile) {
+            const status = profile.subscription_status || 'free'
+            console.log('Subscription status:', status, 'isPro:', status === 'active' || status === 'past_due')
+            setSubscriptionStatus(status)
+            setIsPro(status === 'active' || status === 'past_due')
+          }
         }
+      } finally {
+        setIsLoadingProfile(false)
       }
     }
     fetchSubscriptionStatus()

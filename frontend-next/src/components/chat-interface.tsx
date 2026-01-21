@@ -56,6 +56,19 @@ export function ChatInterface({
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const supabase = createClient();
 
+  // Update usage state when isPro prop changes
+  useEffect(() => {
+    setUsage(prev => ({
+      ...prev,
+      limit: isPro ? "unlimited" : initialUsage.limit,
+      remaining: isPro ? "unlimited" : initialUsage.limit - prev.used,
+      is_pro: isPro
+    }));
+    if (isPro) {
+      setLimitReached(false);
+    }
+  }, [isPro, initialUsage.limit]);
+
   // Auto-scroll to bottom when messages change or streaming content updates
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
