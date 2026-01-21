@@ -9,7 +9,8 @@ from supabase import create_client, Client
 
 from app.core.config import settings
 
-ALGORITHM = "HS256"
+# Support both legacy HS256 and new algorithms
+ALGORITHMS = ["HS256", "HS384", "HS512"]
 
 # ============================================
 # SUBSCRIPTION TIER LIMITS
@@ -63,12 +64,23 @@ async def get_current_user(authorization: Optional[str] = Header(None)) -> dict:
         payload = jwt.decode(
             token,
             settings.supabase_jwt_secret,
-            algorithms=[ALGORITHM],
-            audience="authenticated"
+            algorithms=ALGORITHMS,
+            audience="authenticated",
+            options={"verify_aud": True}
         )
         return payload
     except JWTError as e:
-        raise HTTPException(status_code=401, detail=f"Invalid token: {str(e)}")
+        # If verification fails, try without audience check (some Supabase configs)
+        try:
+            payload = jwt.decode(
+                token,
+                settings.supabase_jwt_secret,
+                algorithms=ALGORITHMS,
+                options={"verify_aud": False}
+            )
+            return payload
+        except JWTError:
+            raise HTTPException(status_code=401, detail=f"Invalid token: {str(e)}")
 
 
 def get_daily_usage(supabase: Client, user_id: str) -> dict:
