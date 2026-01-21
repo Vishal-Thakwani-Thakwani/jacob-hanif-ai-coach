@@ -1,7 +1,7 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Send, Upload, Loader2, X, Crown, Lock } from "lucide-react";
+import { Send, Upload, Loader2, X, Crown, Lock, Camera } from "lucide-react";
 import Image from "next/image";
 import Link from "next/link";
 import { Button } from "@/components/ui/button";
@@ -60,6 +60,32 @@ export function ChatInterface({
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, streamingContent]);
+
+  // Handle paste events for images (Command+V)
+  const handlePaste = (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items) return;
+
+    for (const item of items) {
+      if (item.type.startsWith("image/")) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (file && usage.is_pro) {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const base64 = (reader.result as string).split(",")[1];
+            setSelectedImage(base64);
+            setImageType(file.type);
+          };
+          reader.readAsDataURL(file);
+        } else if (!usage.is_pro) {
+          // Show message that image upload is Pro only
+          alert("Image upload is a Pro feature. Upgrade to analyze your form!");
+        }
+        break;
+      }
+    }
+  };
 
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -371,11 +397,13 @@ export function ChatInterface({
         )}
         
         <div className="flex gap-2 items-end">
+          {/* Hidden file input - accepts camera on mobile */}
           <input
             type="file"
             ref={fileInputRef}
             onChange={handleImageUpload}
             accept="image/*"
+            capture="environment"
             className="hidden"
           />
           
@@ -386,9 +414,9 @@ export function ChatInterface({
               size="icon"
               onClick={() => fileInputRef.current?.click()}
               disabled={isLoading}
-              title="Upload image for form analysis"
+              title="Upload image, take photo, or paste (Cmd+V)"
             >
-              <Upload className="h-4 w-4" />
+              <Camera className="h-4 w-4" />
             </Button>
           ) : (
             <Button
@@ -399,7 +427,7 @@ export function ChatInterface({
               className="opacity-50 cursor-not-allowed"
             >
               <div className="relative">
-                <Upload className="h-4 w-4" />
+                <Camera className="h-4 w-4" />
                 <Lock className="h-2.5 w-2.5 absolute -bottom-0.5 -right-0.5 text-orange-500" />
               </div>
             </Button>
@@ -409,6 +437,7 @@ export function ChatInterface({
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
             placeholder={limitReached && !usage.is_pro 
               ? "Upgrade to Pro for unlimited messages..." 
               : "Ask about training, form, recovery..."}
