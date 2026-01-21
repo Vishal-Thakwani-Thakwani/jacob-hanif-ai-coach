@@ -179,6 +179,29 @@ CREATE TRIGGER update_conversations_updated_at
     FOR EACH ROW EXECUTE FUNCTION update_updated_at_column();
 
 -- ============================================
+-- 12. DAILY USAGE TABLE (for free tier limits)
+-- ============================================
+CREATE TABLE IF NOT EXISTS daily_usage (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID REFERENCES profiles(id) ON DELETE CASCADE NOT NULL,
+    date DATE NOT NULL DEFAULT CURRENT_DATE,
+    message_count INT DEFAULT 0,
+    image_uploads INT DEFAULT 0,
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE(user_id, date)
+);
+
+-- Index for fast lookups
+CREATE INDEX IF NOT EXISTS idx_daily_usage_user_date ON daily_usage(user_id, date);
+
+-- RLS Policy
+ALTER TABLE daily_usage ENABLE ROW LEVEL SECURITY;
+
+DROP POLICY IF EXISTS "Users can view own usage" ON daily_usage;
+CREATE POLICY "Users can view own usage" ON daily_usage
+    FOR ALL USING (auth.uid() = user_id);
+
+-- ============================================
 -- SETUP COMPLETE!
 -- ============================================
 -- Next steps:

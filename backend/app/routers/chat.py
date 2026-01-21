@@ -10,7 +10,13 @@ from pydantic import BaseModel
 from openai import AsyncOpenAI
 
 from app.core.config import settings
-from app.core.auth import require_subscription, get_supabase
+from app.core.auth import (
+    require_subscription, 
+    get_supabase, 
+    check_message_limit, 
+    get_user_with_profile,
+    increment_usage
+)
 from app.rag.prompt import SYSTEM_PROMPT, VISION_PROMPT
 from app.rag.vector_store import get_vector_store
 from app.db import database as db
@@ -129,15 +135,31 @@ class StreamChatRequest(BaseModel):
 @router.post("/chat/stream")
 async def chat_stream(
     request: StreamChatRequest,
-    user: dict = Depends(require_subscription)
+    user: dict = Depends(check_message_limit)
 ):
-    """Stream chat response using Server-Sent Events."""
+    """Stream chat response using Server-Sent Events.
+    
+    Free users: 5 messages/day, no image upload
+    Pro users: Unlimited messages, image upload, Oura integration
+    """
     if not settings.openai_api_key:
         raise HTTPException(status_code=400, detail="OPENAI_API_KEY not set.")
     
     user_id = user.get("sub")
     conversation_id = request.conversation_id
     has_image = bool(request.image_b64)
+    is_pro = user.get("is_pro", False)
+    
+    # Block image uploads for free users
+    if has_image and not is_pro:
+        raise HTTPException(
+            status_code=403,
+            detail={
+                "error": "Pro feature required",
+                "message": "Image form analysis is a Pro feature. Upgrade to get personalized form feedback!",
+                "upgrade_url": "/pricing"
+            }
+        )
     
     # Get Supabase client
     supabase = get_supabase()
@@ -153,10 +175,10 @@ async def chat_stream(
             .execute()
         history = list(reversed(result.data)) if result.data else []
     
-    # 2. Get Oura context FROM DATABASE (fast!)
+    # 2. Get Oura context FROM DATABASE (Pro only)
     oura_context = ""
     profile = user.get("profile", {})
-    if profile.get("oura_access_token"):
+    if is_pro and profile.get("oura_access_token"):
         oura_result = supabase.table("oura_daily") \
             .select("*") \
             .eq("user_id", user_id) \
@@ -201,6 +223,10 @@ User's Recovery Data (from Oura Ring):
     # Choose model
     model = "gpt-4o" if has_image else settings.openai_model
     
+    # Get current usage for response
+    usage = user.get("usage", {})
+    limits = user.get("limits", {})
+    
     async def generate():
         """Generator that yields SSE events and saves response."""
         client = AsyncOpenAI(api_key=settings.openai_api_key)
@@ -230,6 +256,16 @@ User's Recovery Data (from Oura Ring):
                     "content": full_response,
                 }).execute()
             
+            # 6. INCREMENT USAGE: Track message count for free users
+            increment_usage(supabase, user_id, "message_count")
+            
+            # Calculate remaining messages
+            current_count = usage.get("message_count", 0) + 1
+            daily_limit = limits.get("daily_messages", 5)
+            remaining = max(0, daily_limit - current_count) if not is_pro else float('inf')
+            
+            # Send done event with usage info
+            yield f"data: {json.dumps({'done': True, 'usage': {'used': current_count, 'limit': daily_limit if not is_pro else 'unlimited', 'remaining': remaining if not is_pro else 'unlimited', 'is_pro': is_pro}})}\n\n"
             yield "data: [DONE]\n\n"
         except Exception as e:
             yield f"data: {json.dumps({'error': str(e)})}\n\n"
@@ -243,6 +279,34 @@ User's Recovery Data (from Oura Ring):
             "X-Accel-Buffering": "no",
         }
     )
+
+
+@router.get("/chat/usage")
+async def get_usage(user: dict = Depends(get_user_with_profile)):
+    """Get current user's usage and tier info."""
+    usage = user.get("usage", {})
+    limits = user.get("limits", {})
+    is_pro = user.get("is_pro", False)
+    
+    daily_limit = limits.get("daily_messages", 5)
+    current_count = usage.get("message_count", 0)
+    
+    return {
+        "is_pro": is_pro,
+        "subscription_status": user.get("profile", {}).get("subscription_status", "free"),
+        "usage": {
+            "messages_used": current_count,
+            "messages_limit": daily_limit if not is_pro else None,
+            "messages_remaining": max(0, daily_limit - current_count) if not is_pro else None,
+            "image_uploads_used": usage.get("image_uploads", 0),
+        },
+        "features": {
+            "image_upload": limits.get("image_upload", False),
+            "oura_integration": limits.get("oura", False),
+            "voice_call": limits.get("voice_call", False),
+            "unlimited_messages": is_pro,
+        }
+    }
 
 
 # Keep the original non-streaming endpoint for backwards compatibility

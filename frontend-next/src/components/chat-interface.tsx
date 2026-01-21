@@ -1,16 +1,25 @@
 "use client";
 
 import { useState, useRef, useEffect } from "react";
-import { Send, Upload, Loader2, X } from "lucide-react";
+import { Send, Upload, Loader2, X, Crown, Lock } from "lucide-react";
 import Image from "next/image";
+import Link from "next/link";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { Avatar } from "@/components/ui/avatar";
 import { Card } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import { streamMessage, OuraData } from "@/lib/api";
 import { Message } from "@/lib/conversations";
 import { createClient } from "@/lib/supabase/client";
 import ReactMarkdown from "react-markdown";
+
+interface UsageInfo {
+  used: number;
+  limit: number | "unlimited";
+  remaining: number | "unlimited";
+  is_pro: boolean;
+}
 
 interface ChatInterfaceProps {
   ouraData?: OuraData | null;
@@ -18,6 +27,8 @@ interface ChatInterfaceProps {
   onMessagesChange: (messages: Message[]) => void;
   onFirstMessage?: (title: string) => void;
   conversationId?: string;
+  isPro?: boolean;
+  initialUsage?: { used: number; limit: number };
 }
 
 export function ChatInterface({ 
@@ -25,13 +36,22 @@ export function ChatInterface({
   messages, 
   onMessagesChange,
   onFirstMessage,
-  conversationId 
+  conversationId,
+  isPro = false,
+  initialUsage = { used: 0, limit: 5 }
 }: ChatInterfaceProps) {
   const [input, setInput] = useState("");
   const [isLoading, setIsLoading] = useState(false);
   const [streamingContent, setStreamingContent] = useState("");
   const [selectedImage, setSelectedImage] = useState<string | null>(null);
   const [imageType, setImageType] = useState<string | null>(null);
+  const [usage, setUsage] = useState<UsageInfo>({
+    used: initialUsage.used,
+    limit: isPro ? "unlimited" : initialUsage.limit,
+    remaining: isPro ? "unlimited" : initialUsage.limit - initialUsage.used,
+    is_pro: isPro
+  });
+  const [limitReached, setLimitReached] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const supabase = createClient();
@@ -64,6 +84,12 @@ export function ChatInterface({
 
   const handleSend = async () => {
     if (!input.trim() && !selectedImage) return;
+    
+    // Check if limit reached for free users
+    if (!usage.is_pro && typeof usage.remaining === "number" && usage.remaining <= 0) {
+      setLimitReached(true);
+      return;
+    }
 
     // Notify parent if this is the first message (for conversation title)
     if (messages.length === 0 && onFirstMessage) {
@@ -101,8 +127,25 @@ export function ChatInterface({
         selectedImage || undefined,
         imageType || undefined
       )) {
-        fullContent += token;
-        setStreamingContent(fullContent);
+        // Check if this is a usage update (JSON with usage field)
+        if (token.startsWith('{"done":true')) {
+          try {
+            const data = JSON.parse(token);
+            if (data.usage) {
+              setUsage(data.usage);
+              if (!data.usage.is_pro && data.usage.remaining <= 0) {
+                setLimitReached(true);
+              }
+            }
+          } catch {
+            // Not JSON, just a token
+            fullContent += token;
+            setStreamingContent(fullContent);
+          }
+        } else {
+          fullContent += token;
+          setStreamingContent(fullContent);
+        }
       }
 
       // Add the complete assistant message
@@ -112,13 +155,35 @@ export function ChatInterface({
       ]);
       setStreamingContent("");
     } catch (error) {
-      onMessagesChange([
-        ...updatedMessages,
-        {
-          role: "assistant",
-          content: `Error: ${error instanceof Error ? error.message : "Failed to get response"}`,
-        },
-      ]);
+      const errorMessage = error instanceof Error ? error.message : "Failed to get response";
+      
+      // Check if it's a rate limit error (429)
+      if (errorMessage.includes("429") || errorMessage.includes("limit")) {
+        setLimitReached(true);
+        onMessagesChange([
+          ...updatedMessages,
+          {
+            role: "assistant",
+            content: "You've reached your daily message limit. Upgrade to Pro for unlimited coaching!",
+          },
+        ]);
+      } else if (errorMessage.includes("403") || errorMessage.includes("Pro feature")) {
+        onMessagesChange([
+          ...updatedMessages,
+          {
+            role: "assistant",
+            content: "This feature requires a Pro subscription. Upgrade to unlock image analysis, Oura integration, and more!",
+          },
+        ]);
+      } else {
+        onMessagesChange([
+          ...updatedMessages,
+          {
+            role: "assistant",
+            content: `Error: ${errorMessage}`,
+          },
+        ]);
+      }
       setStreamingContent("");
     } finally {
       setIsLoading(false);
@@ -270,8 +335,41 @@ export function ChatInterface({
         </div>
       )}
 
+      {/* Limit Reached Banner */}
+      {limitReached && !usage.is_pro && (
+        <div className="px-4 py-3 bg-gradient-to-r from-orange-500/10 to-red-600/10 border-t border-orange-500/20">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <Crown className="h-5 w-5 text-orange-500" />
+              <span className="text-sm font-medium">
+                You&apos;ve used all {usage.limit} free messages today
+              </span>
+            </div>
+            <Link href="/pricing">
+              <Button size="sm" className="bg-gradient-to-r from-orange-500 to-red-600">
+                Upgrade to Pro
+              </Button>
+            </Link>
+          </div>
+        </div>
+      )}
+
       {/* Input Area */}
       <div className="p-4 border-t bg-background">
+        {/* Usage Counter for Free Users */}
+        {!usage.is_pro && typeof usage.remaining === "number" && (
+          <div className="flex items-center justify-between mb-2 text-xs text-muted-foreground">
+            <span>
+              {usage.used}/{usage.limit} messages used today
+            </span>
+            {usage.remaining <= 2 && usage.remaining > 0 && (
+              <Badge variant="outline" className="text-orange-500 border-orange-500">
+                {usage.remaining} left
+              </Badge>
+            )}
+          </div>
+        )}
+        
         <div className="flex gap-2 items-end">
           <input
             type="file"
@@ -280,25 +378,46 @@ export function ChatInterface({
             accept="image/*"
             className="hidden"
           />
-          <Button
-            variant="outline"
-            size="icon"
-            onClick={() => fileInputRef.current?.click()}
-            disabled={isLoading}
-          >
-            <Upload className="h-4 w-4" />
-          </Button>
+          
+          {/* Image Upload Button - Pro Only */}
+          {usage.is_pro ? (
+            <Button
+              variant="outline"
+              size="icon"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={isLoading}
+              title="Upload image for form analysis"
+            >
+              <Upload className="h-4 w-4" />
+            </Button>
+          ) : (
+            <Button
+              variant="outline"
+              size="icon"
+              disabled
+              title="Image upload is a Pro feature"
+              className="opacity-50 cursor-not-allowed"
+            >
+              <div className="relative">
+                <Upload className="h-4 w-4" />
+                <Lock className="h-2.5 w-2.5 absolute -bottom-0.5 -right-0.5 text-orange-500" />
+              </div>
+            </Button>
+          )}
+          
           <Textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="Ask about training, form, recovery..."
+            placeholder={limitReached && !usage.is_pro 
+              ? "Upgrade to Pro for unlimited messages..." 
+              : "Ask about training, form, recovery..."}
             className="min-h-[44px] max-h-32 resize-none"
-            disabled={isLoading}
+            disabled={isLoading || (limitReached && !usage.is_pro)}
           />
           <Button
             onClick={handleSend}
-            disabled={isLoading || (!input.trim() && !selectedImage)}
+            disabled={isLoading || (!input.trim() && !selectedImage) || (limitReached && !usage.is_pro)}
             className="bg-gradient-to-r from-orange-500 to-red-600 hover:from-orange-600 hover:to-red-700"
           >
             {isLoading ? (

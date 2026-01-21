@@ -4,12 +4,39 @@ import { useState, useEffect } from 'react'
 import { ChatInterface } from '@/components/chat-interface'
 import { Message, Conversation, loadConversations, saveConversations, createConversation } from '@/lib/conversations'
 import { Button } from '@/components/ui/button'
-import { Plus, MessageSquare, Trash2 } from 'lucide-react'
+import { Badge } from '@/components/ui/badge'
+import { Plus, MessageSquare, Trash2, Crown } from 'lucide-react'
+import { createClient } from '@/lib/supabase/client'
+import Link from 'next/link'
 
 export default function ChatPage() {
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [currentConvoId, setCurrentConvoId] = useState<string | null>(null)
   const [messages, setMessages] = useState<Message[]>([])
+  const [isPro, setIsPro] = useState(false)
+  const [subscriptionStatus, setSubscriptionStatus] = useState<string>('free')
+  const supabase = createClient()
+
+  // Fetch user subscription status
+  useEffect(() => {
+    async function fetchSubscriptionStatus() {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        const { data: profile } = await supabase
+          .from('profiles')
+          .select('subscription_status')
+          .eq('id', user.id)
+          .single()
+        
+        if (profile) {
+          const status = profile.subscription_status || 'free'
+          setSubscriptionStatus(status)
+          setIsPro(status === 'active' || status === 'past_due')
+        }
+      }
+    }
+    fetchSubscriptionStatus()
+  }, [supabase])
 
   // Load conversations from localStorage on mount
   useEffect(() => {
@@ -94,7 +121,22 @@ export default function ChatPage() {
     <div className="flex h-[calc(100vh-0px)]">
       {/* Chat History Sidebar */}
       <div className="w-64 border-r bg-card flex flex-col">
-        <div className="p-3 border-b">
+        <div className="p-3 border-b space-y-2">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-medium">Your Plan</span>
+            {isPro ? (
+              <Badge className="bg-gradient-to-r from-orange-500 to-red-600">
+                <Crown className="h-3 w-3 mr-1" />
+                Pro
+              </Badge>
+            ) : (
+              <Link href="/pricing">
+                <Badge variant="outline" className="cursor-pointer hover:bg-muted">
+                  Free
+                </Badge>
+              </Link>
+            )}
+          </div>
           <Button onClick={handleNewChat} className="w-full gap-2" size="sm">
             <Plus className="h-4 w-4" />
             New Chat
@@ -145,6 +187,7 @@ export default function ChatPage() {
           onMessagesChange={handleMessagesChange}
           onFirstMessage={handleFirstMessage}
           conversationId={currentConvoId || undefined}
+          isPro={isPro}
         />
       </div>
     </div>
