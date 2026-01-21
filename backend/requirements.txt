@@ -17,3 +17,4 @@ requests
 # Auth & Database
 supabase
 python-jose[cryptography]
+httpx

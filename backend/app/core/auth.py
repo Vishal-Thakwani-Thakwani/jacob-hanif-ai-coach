@@ -1,16 +1,75 @@
 """
-JWT verification for Supabase tokens.
+JWT verification for Supabase tokens using ES256 (Elliptic Curve).
 """
 from fastapi import HTTPException, Depends, Header
-from jose import jwt, JWTError
+from jose import jwt, JWTError, jwk
+from jose.utils import base64url_decode
 from typing import Optional
 from datetime import date
-from supabase import create_client, Client
+import httpx
+import json
+from functools import lru_cache
+import time
 
+from supabase import create_client, Client
 from app.core.config import settings
 
-# Support both legacy HS256 and new algorithms
-ALGORITHMS = ["HS256", "HS384", "HS512"]
+# ============================================
+# JWKS CACHE
+# ============================================
+_jwks_cache = {"keys": None, "fetched_at": 0}
+JWKS_CACHE_TTL = 3600  # 1 hour
+
+def get_jwks():
+    """Fetch and cache JWKS from Supabase."""
+    global _jwks_cache
+    
+    now = time.time()
+    if _jwks_cache["keys"] and (now - _jwks_cache["fetched_at"]) < JWKS_CACHE_TTL:
+        return _jwks_cache["keys"]
+    
+    # Fetch fresh JWKS
+    jwks_url = f"{settings.supabase_url}/auth/v1/.well-known/jwks.json"
+    try:
+        response = httpx.get(jwks_url, timeout=10)
+        response.raise_for_status()
+        jwks_data = response.json()
+        _jwks_cache["keys"] = jwks_data.get("keys", [])
+        _jwks_cache["fetched_at"] = now
+        return _jwks_cache["keys"]
+    except Exception as e:
+        print(f"Failed to fetch JWKS: {e}")
+        # Return cached keys if available, even if stale
+        if _jwks_cache["keys"]:
+            return _jwks_cache["keys"]
+        raise HTTPException(status_code=500, detail="Failed to fetch JWKS")
+
+
+def get_signing_key(token: str):
+    """Get the signing key for a JWT from JWKS."""
+    try:
+        # Get the unverified header to find the key ID
+        unverified_header = jwt.get_unverified_header(token)
+        kid = unverified_header.get("kid")
+        alg = unverified_header.get("alg")
+        
+        print(f"Token header - kid: {kid}, alg: {alg}")
+        
+        keys = get_jwks()
+        
+        # Find the matching key
+        for key in keys:
+            if key.get("kid") == kid:
+                return key, alg
+        
+        # If no kid match, return the first key (Supabase usually has one key)
+        if keys:
+            return keys[0], alg
+            
+        raise HTTPException(status_code=401, detail="No signing key found")
+    except JWTError as e:
+        raise HTTPException(status_code=401, detail=f"Invalid token header: {str(e)}")
+
 
 # ============================================
 # SUBSCRIPTION TIER LIMITS
@@ -46,7 +105,7 @@ def get_supabase() -> Client:
 
 async def get_current_user(authorization: Optional[str] = Header(None)) -> dict:
     """
-    Verify Supabase JWT from Authorization header.
+    Verify Supabase JWT from Authorization header using JWKS.
     Returns the decoded JWT payload containing user info.
     """
     if not authorization:
@@ -57,29 +116,40 @@ async def get_current_user(authorization: Optional[str] = Header(None)) -> dict:
     
     token = authorization.replace("Bearer ", "")
     
-    if not settings.supabase_jwt_secret:
-        raise HTTPException(status_code=500, detail="JWT secret not configured")
-    
     try:
+        # Get the signing key from JWKS
+        signing_key, alg = get_signing_key(token)
+        
+        # Construct the public key from JWK
+        public_key = jwk.construct(signing_key)
+        
+        # Decode and verify the token
         payload = jwt.decode(
             token,
-            settings.supabase_jwt_secret,
-            algorithms=ALGORITHMS,
+            public_key,
+            algorithms=[alg],
             audience="authenticated",
             options={"verify_aud": True}
         )
+        print(f"Token verified successfully for user: {payload.get('sub')}")
         return payload
+        
     except JWTError as e:
-        # If verification fails, try without audience check (some Supabase configs)
+        print(f"JWT verification failed: {str(e)}")
+        # Try without audience verification as fallback
         try:
+            signing_key, alg = get_signing_key(token)
+            public_key = jwk.construct(signing_key)
             payload = jwt.decode(
                 token,
-                settings.supabase_jwt_secret,
-                algorithms=ALGORITHMS,
+                public_key,
+                algorithms=[alg],
                 options={"verify_aud": False}
             )
+            print(f"Token verified (no aud) for user: {payload.get('sub')}")
             return payload
-        except JWTError:
+        except JWTError as e2:
+            print(f"JWT verification failed (fallback): {str(e2)}")
             raise HTTPException(status_code=401, detail=f"Invalid token: {str(e)}")
 
 
