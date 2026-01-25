@@ -45,10 +45,13 @@ export default function SignUpPage() {
 
   const handleGoogleSignUp = async () => {
     setError(null)
+    // Preserve redirect to dashboard after signup
+    const redirectUrl = `${window.location.origin}/auth/callback?next=/dashboard`
+    
     const { error } = await supabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: `${window.location.origin}/auth/callback`,
+        redirectTo: redirectUrl,
       },
     })
 

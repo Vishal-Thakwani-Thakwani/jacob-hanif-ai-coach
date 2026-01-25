@@ -6,6 +6,9 @@ export async function GET(request: Request) {
   const code = searchParams.get('code')
   const next = searchParams.get('next') ?? '/dashboard'
 
+  // Use NEXT_PUBLIC_APP_URL for production, fallback to origin
+  const baseUrl = process.env.NEXT_PUBLIC_APP_URL || origin
+
   if (code) {
     const supabase = await createClient()
     const { error, data } = await supabase.auth.exchangeCodeForSession(code)
@@ -18,23 +21,14 @@ export async function GET(request: Request) {
         .eq('id', data.user.id)
         .single()
       
-      const forwardedHost = request.headers.get('x-forwarded-host')
-      const isLocalEnv = process.env.NODE_ENV === 'development'
-      
-      // Redirect to onboarding if no name set (or Google didn't provide one)
+      // Redirect to onboarding if no name set
       const hasName = profile?.name && profile.name.trim().length > 0
       const redirectPath = hasName ? next : '/onboarding'
       
-      if (isLocalEnv) {
-        return NextResponse.redirect(`${origin}${redirectPath}`)
-      } else if (forwardedHost) {
-        return NextResponse.redirect(`https://${forwardedHost}${redirectPath}`)
-      } else {
-        return NextResponse.redirect(`${origin}${redirectPath}`)
-      }
+      return NextResponse.redirect(`${baseUrl}${redirectPath}`)
     }
   }
 
   // return the user to an error page with instructions
-  return NextResponse.redirect(`${origin}/auth/auth-code-error`)
+  return NextResponse.redirect(`${baseUrl}/auth/auth-code-error`)
 }
