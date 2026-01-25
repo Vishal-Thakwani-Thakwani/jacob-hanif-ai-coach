@@ -52,7 +52,6 @@ export default async function DashboardLayout({
             <Button variant="ghost" className="w-full justify-start gap-2">
               <Phone className="h-4 w-4" />
               Call
-              <span className="ml-auto text-xs bg-muted px-2 py-0.5 rounded">Soon</span>
             </Button>
           </Link>
           <Link href="/dashboard/settings">

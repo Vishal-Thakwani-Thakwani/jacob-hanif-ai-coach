@@ -121,28 +121,30 @@ export default async function DashboardPage() {
           </Link>
           
           {isPro ? (
-            <Card className="opacity-60 h-full border-dashed">
-              <CardHeader>
-                <div className="h-12 w-12 rounded-lg bg-muted flex items-center justify-center mb-4">
-                  <Phone className="h-6 w-6 text-muted-foreground" />
-                </div>
-                <CardTitle className="flex items-center gap-2">
-                  Call Jacob
-                  <span className="text-xs bg-orange-500/20 text-orange-500 px-2 py-0.5 rounded font-normal">
-                    Coming Soon
-                  </span>
-                </CardTitle>
-                <CardDescription>
-                  Voice coaching powered by AI. Have a real-time 
-                  conversation for hands-free coaching while you train.
-                </CardDescription>
-              </CardHeader>
-              <CardContent>
-                <Button className="w-full" variant="outline" disabled>
-                  Coming Soon
-                </Button>
-              </CardContent>
-            </Card>
+            <Link href="/dashboard/call" className="block h-full">
+              <Card className="h-full hover:border-green-500/50 transition-colors cursor-pointer">
+                <CardHeader>
+                  <div className="h-12 w-12 rounded-lg bg-green-500/10 flex items-center justify-center mb-4">
+                    <Phone className="h-6 w-6 text-green-500" />
+                  </div>
+                  <CardTitle className="flex items-center gap-2">
+                    Call Jacob
+                    <Badge className="bg-green-500">
+                      Live
+                    </Badge>
+                  </CardTitle>
+                  <CardDescription>
+                    Voice coaching powered by AI. Have a real-time 
+                    conversation for hands-free coaching while you train.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent>
+                  <Button className="w-full bg-green-600 hover:bg-green-700">
+                    Start Call
+                  </Button>
+                </CardContent>
+              </Card>
+            </Link>
           ) : (
             <Card className="h-full border-dashed relative overflow-hidden">
               <div className="absolute inset-0 bg-gradient-to-br from-orange-500/5 to-red-600/5" />
