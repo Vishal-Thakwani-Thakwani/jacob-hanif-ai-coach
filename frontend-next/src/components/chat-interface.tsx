@@ -152,10 +152,15 @@ export function ChatInterface({
 
     try {
       // Get access token from Supabase session
-      const { data: { session } } = await supabase.auth.getSession();
+      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
+      console.log("Session:", session ? "found" : "missing", "Error:", sessionError);
+      
       if (!session?.access_token) {
         throw new Error("Not authenticated. Please sign in again.");
       }
+      
+      console.log("Sending message to backend...");
+      console.log("Backend URL:", process.env.NEXT_PUBLIC_BACKEND_URL);
 
       // Stream the response
       let fullContent = "";
@@ -194,6 +199,7 @@ export function ChatInterface({
       ]);
       setStreamingContent("");
     } catch (error) {
+      console.error("Chat error:", error);
       const errorMessage = error instanceof Error ? error.message : "Failed to get response";
       
       // Check if it's a rate limit error (429)

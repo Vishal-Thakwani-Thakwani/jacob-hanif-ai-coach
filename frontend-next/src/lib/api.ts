@@ -55,22 +55,33 @@ export async function* streamMessage(
   imageB64?: string,
   imageType?: string
 ): AsyncGenerator<string, void, unknown> {
-  const response = await fetch(`${BACKEND_URL}/chat/stream`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${accessToken}`,
-    },
-    body: JSON.stringify({
-      message,
-      conversation_id: conversationId,
-      image_b64: imageB64,
-      image_type: imageType,
-    }),
-  });
+  console.log("streamMessage called, URL:", `${BACKEND_URL}/chat/stream`);
+  
+  let response: Response;
+  try {
+    response = await fetch(`${BACKEND_URL}/chat/stream`, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${accessToken}`,
+      },
+      body: JSON.stringify({
+        message,
+        conversation_id: conversationId,
+        image_b64: imageB64,
+        image_type: imageType,
+      }),
+    });
+  } catch (fetchError) {
+    console.error("Fetch failed:", fetchError);
+    throw new Error(`Network error: ${fetchError instanceof Error ? fetchError.message : 'Failed to connect to server'}`);
+  }
+
+  console.log("Response status:", response.status);
 
   if (!response.ok) {
     const errorText = await response.text();
+    console.error("API error:", response.status, errorText);
     throw new Error(`Chat failed: ${response.status} - ${errorText}`);
   }
 

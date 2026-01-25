@@ -29,6 +29,10 @@ class Settings(BaseSettings):
     supabase_url: Optional[str] = None
     supabase_service_key: Optional[str] = None
     supabase_jwt_secret: Optional[str] = None
+    
+    # ElevenLabs Voice
+    elevenlabs_api_key: Optional[str] = None
+    elevenlabs_voice_id: str = Field(default="o3uVEWMvjriqkdpLxRL6")  # Jacob's voice
 
 
 settings = Settings()
