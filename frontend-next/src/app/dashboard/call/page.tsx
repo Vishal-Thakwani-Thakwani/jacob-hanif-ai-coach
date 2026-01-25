@@ -2,7 +2,7 @@
 
 import { useState, useRef, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Mic, MicOff, Phone, PhoneOff, Volume2, Loader2 } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
@@ -10,17 +10,9 @@ import Image from 'next/image'
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
 
-// Extend Window interface for speech recognition
-declare global {
-  interface Window {
-    SpeechRecognition: typeof SpeechRecognition
-    webkitSpeechRecognition: typeof SpeechRecognition
-  }
-}
-
 export default function CallPage() {
   const [isCallActive, setIsCallActive] = useState(false)
-  const [isListening, setIsListening] = useState(false)
+  const [isRecording, setIsRecording] = useState(false)
   const [isSpeaking, setIsSpeaking] = useState(false)
   const [isProcessing, setIsProcessing] = useState(false)
   const [transcript, setTranscript] = useState('')
@@ -28,62 +20,12 @@ export default function CallPage() {
   const [error, setError] = useState<string | null>(null)
   const [callDuration, setCallDuration] = useState(0)
   
-  const recognitionRef = useRef<SpeechRecognition | null>(null)
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null)
+  const audioChunksRef = useRef<Blob[]>([])
   const audioRef = useRef<HTMLAudioElement | null>(null)
+  const streamRef = useRef<MediaStream | null>(null)
   const callTimerRef = useRef<NodeJS.Timeout | null>(null)
   const supabase = createClient()
-
-  // Initialize speech recognition
-  useEffect(() => {
-    if (typeof window !== 'undefined') {
-      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition
-      if (SpeechRecognition) {
-        const recognition = new SpeechRecognition()
-        recognition.continuous = false
-        recognition.interimResults = true
-        recognition.lang = 'en-US'
-        
-        recognition.onresult = (event) => {
-          const current = event.resultIndex
-          const result = event.results[current]
-          const transcriptText = result[0].transcript
-          setTranscript(transcriptText)
-          
-          if (result.isFinal) {
-            handleUserMessage(transcriptText)
-          }
-        }
-        
-        recognition.onerror = (event) => {
-          console.error('Speech recognition error:', event.error)
-          setIsListening(false)
-          if (event.error === 'not-allowed') {
-            setError('Microphone access denied. Please allow microphone access.')
-          }
-        }
-        
-        recognition.onend = () => {
-          setIsListening(false)
-          // Auto-restart if call is still active and not processing
-          if (isCallActive && !isProcessing && !isSpeaking) {
-            setTimeout(() => {
-              if (isCallActive) startListening()
-            }, 500)
-          }
-        }
-        
-        recognitionRef.current = recognition
-      } else {
-        setError('Speech recognition not supported in this browser. Try Chrome.')
-      }
-    }
-    
-    return () => {
-      if (recognitionRef.current) {
-        recognitionRef.current.abort()
-      }
-    }
-  }, [isCallActive, isProcessing, isSpeaking])
 
   // Call duration timer
   useEffect(() => {
@@ -111,30 +53,53 @@ export default function CallPage() {
     return `${mins}:${secs.toString().padStart(2, '0')}`
   }
 
-  const startListening = () => {
-    if (recognitionRef.current && !isListening && !isSpeaking) {
-      try {
-        recognitionRef.current.start()
-        setIsListening(true)
-        setTranscript('')
-      } catch (e) {
-        console.error('Failed to start recognition:', e)
+  const startRecording = async () => {
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      streamRef.current = stream
+      
+      const mediaRecorder = new MediaRecorder(stream, {
+        mimeType: 'audio/webm;codecs=opus'
+      })
+      
+      audioChunksRef.current = []
+      
+      mediaRecorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          audioChunksRef.current.push(event.data)
+        }
+      }
+      
+      mediaRecorder.onstop = async () => {
+        const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
+        await processAudio(audioBlob)
+      }
+      
+      mediaRecorderRef.current = mediaRecorder
+      mediaRecorder.start()
+      setIsRecording(true)
+      setTranscript('')
+      
+    } catch (err) {
+      console.error('Failed to start recording:', err)
+      setError('Microphone access denied. Please allow microphone access.')
+    }
+  }
+
+  const stopRecording = () => {
+    if (mediaRecorderRef.current && isRecording) {
+      mediaRecorderRef.current.stop()
+      setIsRecording(false)
+      
+      // Stop all tracks
+      if (streamRef.current) {
+        streamRef.current.getTracks().forEach(track => track.stop())
       }
     }
   }
 
-  const stopListening = () => {
-    if (recognitionRef.current) {
-      recognitionRef.current.stop()
-      setIsListening(false)
-    }
-  }
-
-  const handleUserMessage = async (message: string) => {
-    if (!message.trim()) return
-    
+  const processAudio = async (audioBlob: Blob) => {
     setIsProcessing(true)
-    stopListening()
     
     try {
       // Get auth token
@@ -143,14 +108,43 @@ export default function CallPage() {
         throw new Error('Not authenticated')
       }
 
-      // Send to chat API (non-streaming for simplicity)
+      // Step 1: Transcribe audio with OpenAI Whisper
+      const formData = new FormData()
+      formData.append('audio', audioBlob, 'recording.webm')
+      
+      const transcribeResponse = await fetch(`${BACKEND_URL}/voice/transcribe`, {
+        method: 'POST',
+        headers: {
+          'Authorization': `Bearer ${session.access_token}`,
+        },
+        body: formData,
+      })
+
+      if (!transcribeResponse.ok) {
+        const errorText = await transcribeResponse.text()
+        throw new Error(`Transcription failed: ${errorText}`)
+      }
+
+      const { text: userMessage } = await transcribeResponse.json()
+      setTranscript(userMessage)
+      
+      if (!userMessage.trim()) {
+        setIsProcessing(false)
+        // Resume recording if call is still active
+        if (isCallActive) {
+          setTimeout(startRecording, 500)
+        }
+        return
+      }
+
+      // Step 2: Get AI response
       const chatResponse = await fetch(`${BACKEND_URL}/chat/stream`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           'Authorization': `Bearer ${session.access_token}`,
         },
-        body: JSON.stringify({ message }),
+        body: JSON.stringify({ message: userMessage }),
       })
 
       if (!chatResponse.ok) {
@@ -178,11 +172,12 @@ export default function CallPage() {
                 const parsed = JSON.parse(data)
                 if (parsed.token) {
                   fullResponse += parsed.token
+                  setJacobResponse(fullResponse)
                 }
               } catch {
-                // Not JSON, might be raw token
-                if (data && data !== '[DONE]') {
+                if (data && data !== '[DONE]' && !data.startsWith('{')) {
                   fullResponse += data
+                  setJacobResponse(fullResponse)
                 }
               }
             }
@@ -190,21 +185,23 @@ export default function CallPage() {
         }
       }
 
-      setJacobResponse(fullResponse)
-      
-      // Convert to speech with ElevenLabs
+      // Step 3: Convert response to Jacob's voice
       await speakResponse(fullResponse, session.access_token)
       
     } catch (err) {
       console.error('Error:', err)
       setError(err instanceof Error ? err.message : 'Something went wrong')
-    } finally {
       setIsProcessing(false)
+      // Try to continue the call
+      if (isCallActive) {
+        setTimeout(startRecording, 1000)
+      }
     }
   }
 
   const speakResponse = async (text: string, accessToken: string) => {
     setIsSpeaking(true)
+    setIsProcessing(false)
     
     try {
       const response = await fetch(`${BACKEND_URL}/voice/synthesize`, {
@@ -217,7 +214,8 @@ export default function CallPage() {
       })
 
       if (!response.ok) {
-        throw new Error('Failed to synthesize voice')
+        const errorText = await response.text()
+        throw new Error(`Voice synthesis failed: ${errorText}`)
       }
 
       // Play audio
@@ -229,41 +227,108 @@ export default function CallPage() {
         audioRef.current.onended = () => {
           setIsSpeaking(false)
           URL.revokeObjectURL(audioUrl)
-          // Resume listening after Jacob finishes speaking
+          // Resume recording after Jacob finishes speaking
           if (isCallActive) {
-            setTimeout(startListening, 300)
+            setTimeout(startRecording, 300)
           }
         }
         await audioRef.current.play()
       }
     } catch (err) {
       console.error('Voice synthesis error:', err)
+      setError(err instanceof Error ? err.message : 'Voice synthesis failed')
       setIsSpeaking(false)
       // Still try to continue the call
       if (isCallActive) {
-        setTimeout(startListening, 500)
+        setTimeout(startRecording, 500)
       }
     }
   }
 
-  const startCall = () => {
+  const startCall = async () => {
     setIsCallActive(true)
     setError(null)
     setTranscript('')
     setJacobResponse('')
     
-    // Start with Jacob greeting
-    handleUserMessage("Hey Jacob, I just started a call with you!")
+    // Start with a greeting from Jacob
+    try {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (session?.access_token) {
+        // Get Jacob's greeting
+        setIsProcessing(true)
+        const chatResponse = await fetch(`${BACKEND_URL}/chat/stream`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${session.access_token}`,
+          },
+          body: JSON.stringify({ 
+            message: "The user just started a voice call with you. Give a brief, friendly greeting (2-3 sentences max) and ask how you can help with their training today." 
+          }),
+        })
+
+        if (chatResponse.ok) {
+          const reader = chatResponse.body?.getReader()
+          const decoder = new TextDecoder()
+          let greeting = ''
+
+          if (reader) {
+            while (true) {
+              const { done, value } = await reader.read()
+              if (done) break
+              
+              const chunk = decoder.decode(value, { stream: true })
+              const lines = chunk.split('\n')
+              
+              for (const line of lines) {
+                if (line.startsWith('data: ')) {
+                  const data = line.slice(6)
+                  if (data === '[DONE]') continue
+                  try {
+                    const parsed = JSON.parse(data)
+                    if (parsed.token) {
+                      greeting += parsed.token
+                      setJacobResponse(greeting)
+                    }
+                  } catch {
+                    if (data && data !== '[DONE]' && !data.startsWith('{')) {
+                      greeting += data
+                      setJacobResponse(greeting)
+                    }
+                  }
+                }
+              }
+            }
+          }
+
+          // Speak the greeting
+          await speakResponse(greeting, session.access_token)
+        }
+      }
+    } catch (err) {
+      console.error('Failed to get greeting:', err)
+      // Start recording anyway
+      startRecording()
+    }
   }
 
   const endCall = () => {
     setIsCallActive(false)
-    stopListening()
+    stopRecording()
     if (audioRef.current) {
       audioRef.current.pause()
     }
     setIsSpeaking(false)
     setIsProcessing(false)
+  }
+
+  const toggleMute = () => {
+    if (isRecording) {
+      stopRecording()
+    } else if (!isSpeaking && !isProcessing) {
+      startRecording()
+    }
   }
 
   return (
@@ -280,7 +345,7 @@ export default function CallPage() {
                 isCallActive 
                   ? isSpeaking 
                     ? 'border-green-500 animate-pulse' 
-                    : isListening
+                    : isRecording
                     ? 'border-orange-500'
                     : 'border-blue-500'
                   : 'border-gray-600'
@@ -291,11 +356,13 @@ export default function CallPage() {
                 <Badge className={
                   isSpeaking 
                     ? 'bg-green-500' 
-                    : isListening 
+                    : isRecording 
                     ? 'bg-orange-500 animate-pulse' 
-                    : 'bg-blue-500'
+                    : isProcessing
+                    ? 'bg-blue-500'
+                    : 'bg-gray-500'
                 }>
-                  {isSpeaking ? 'Speaking' : isListening ? 'Listening' : isProcessing ? 'Thinking' : 'Connected'}
+                  {isSpeaking ? 'Speaking' : isRecording ? 'Listening' : isProcessing ? 'Thinking' : 'Ready'}
                 </Badge>
               </div>
             )}
@@ -314,16 +381,24 @@ export default function CallPage() {
           <Card className="mb-6 border-red-500 bg-red-500/10">
             <CardContent className="pt-4">
               <p className="text-red-500 text-center">{error}</p>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                className="mx-auto mt-2 block"
+                onClick={() => setError(null)}
+              >
+                Dismiss
+              </Button>
             </CardContent>
           </Card>
         )}
 
         {/* Call Status Card */}
         <Card className="mb-6">
-          <CardContent className="pt-6">
-            {/* Transcript */}
+          <CardContent className="pt-6 space-y-4">
+            {/* Your message */}
             {transcript && (
-              <div className="mb-4 p-3 bg-muted rounded-lg">
+              <div className="p-3 bg-muted rounded-lg">
                 <p className="text-sm text-muted-foreground mb-1">You said:</p>
                 <p>{transcript}</p>
               </div>
@@ -331,7 +406,7 @@ export default function CallPage() {
             
             {/* Jacob's Response */}
             {jacobResponse && (
-              <div className="mb-4 p-3 bg-orange-500/10 rounded-lg border border-orange-500/20">
+              <div className="p-3 bg-orange-500/10 rounded-lg border border-orange-500/20">
                 <p className="text-sm text-orange-500 mb-1 flex items-center gap-2">
                   {isSpeaking && <Volume2 className="h-4 w-4 animate-pulse" />}
                   Jacob:
@@ -340,19 +415,27 @@ export default function CallPage() {
               </div>
             )}
 
-            {/* Processing indicator */}
+            {/* Status indicators */}
             {isProcessing && (
-              <div className="flex items-center justify-center gap-2 text-muted-foreground">
-                <Loader2 className="h-4 w-4 animate-spin" />
+              <div className="flex items-center justify-center gap-2 text-muted-foreground py-4">
+                <Loader2 className="h-5 w-5 animate-spin" />
                 <span>Jacob is thinking...</span>
               </div>
             )}
 
-            {/* Listening indicator */}
-            {isListening && !isProcessing && (
-              <div className="flex items-center justify-center gap-2 text-orange-500">
-                <Mic className="h-4 w-4 animate-pulse" />
-                <span>Listening... speak now</span>
+            {isRecording && !isProcessing && (
+              <div className="flex items-center justify-center gap-2 text-orange-500 py-4">
+                <div className="relative">
+                  <Mic className="h-5 w-5" />
+                  <span className="absolute -top-1 -right-1 h-2 w-2 bg-red-500 rounded-full animate-pulse" />
+                </div>
+                <span>Recording... speak now</span>
+              </div>
+            )}
+
+            {!isCallActive && (
+              <div className="text-center text-muted-foreground py-4">
+                Click "Start Call" to begin talking with Jacob
               </div>
             )}
           </CardContent>
@@ -364,7 +447,7 @@ export default function CallPage() {
             <Button 
               size="lg" 
               onClick={startCall}
-              className="bg-green-600 hover:bg-green-700 gap-2"
+              className="bg-green-600 hover:bg-green-700 gap-2 px-8"
             >
               <Phone className="h-5 w-5" />
               Start Call
@@ -373,19 +456,20 @@ export default function CallPage() {
             <>
               <Button
                 size="lg"
-                variant="outline"
-                onClick={isListening ? stopListening : startListening}
+                variant={isRecording ? "default" : "outline"}
+                onClick={toggleMute}
                 disabled={isSpeaking || isProcessing}
+                className={isRecording ? "bg-orange-500 hover:bg-orange-600" : ""}
               >
-                {isListening ? (
+                {isRecording ? (
                   <>
                     <MicOff className="h-5 w-5 mr-2" />
-                    Mute
+                    Stop Recording
                   </>
                 ) : (
                   <>
                     <Mic className="h-5 w-5 mr-2" />
-                    Unmute
+                    Start Recording
                   </>
                 )}
               </Button>
@@ -410,13 +494,14 @@ export default function CallPage() {
         {!isCallActive && (
           <Card className="mt-8">
             <CardHeader>
-              <CardTitle className="text-lg">Tips for your call</CardTitle>
+              <CardTitle className="text-lg">How it works</CardTitle>
             </CardHeader>
             <CardContent className="space-y-2 text-sm text-muted-foreground">
-              <p>• Speak clearly and wait for Jacob to finish before responding</p>
-              <p>• Ask about exercises, form tips, recovery, or workout plans</p>
-              <p>• Works best in Chrome browser</p>
-              <p>• Make sure your microphone is allowed</p>
+              <p>1. Click "Start Call" - Jacob will greet you</p>
+              <p>2. Click "Start Recording" and speak your question</p>
+              <p>3. Click "Stop Recording" when done speaking</p>
+              <p>4. Wait for Jacob to respond in his voice</p>
+              <p>5. Repeat until you're done, then "End Call"</p>
             </CardContent>
           </Card>
         )}
