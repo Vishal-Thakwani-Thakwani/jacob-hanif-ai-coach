@@ -1,11 +1,16 @@
 'use client'
 
 import Link from 'next/link'
+import { useSearchParams } from 'next/navigation'
+import { Suspense } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card'
 import { AlertCircle } from 'lucide-react'
 
-export default function AuthCodeError() {
+function ErrorContent() {
+  const searchParams = useSearchParams()
+  const errorMessage = searchParams.get('error')
+  
   return (
     <div className="min-h-screen flex items-center justify-center bg-background p-4">
       <Card className="w-full max-w-md">
@@ -19,6 +24,11 @@ export default function AuthCodeError() {
           </CardDescription>
         </CardHeader>
         <CardContent className="text-center text-sm text-muted-foreground">
+          {errorMessage && (
+            <div className="mb-4 p-2 bg-destructive/10 rounded text-destructive text-xs font-mono">
+              Error: {errorMessage}
+            </div>
+          )}
           <p>Please try signing in again. If the problem persists, try:</p>
           <ul className="mt-2 text-left list-disc list-inside">
             <li>Clearing your browser cookies</li>
@@ -36,5 +46,13 @@ export default function AuthCodeError() {
         </CardFooter>
       </Card>
     </div>
+  )
+}
+
+export default function AuthCodeError() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading...</div>}>
+      <ErrorContent />
+    </Suspense>
   )
 }
