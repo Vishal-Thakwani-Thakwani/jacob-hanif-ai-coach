@@ -197,6 +197,9 @@ export default function CallPage() {
       const { MicVAD } = await import('@ricky0123/vad-web')
       
       const vad = await MicVAD.new({
+        // Use CDN for ONNX runtime WASM files to avoid Next.js bundling issues
+        onnxWASMBasePath: 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.14.0/dist/',
+        modelURL: 'https://cdn.jsdelivr.net/npm/@ricky0123/vad-web@0.0.7/dist/silero_vad.onnx',
         onSpeechStart: () => {
           console.log('Speech started')
           setAudioLevel(1)
@@ -222,7 +225,7 @@ export default function CallPage() {
       return vad
     } catch (err) {
       console.error('VAD initialization failed:', err)
-      throw err
+      throw new Error(`Voice detection failed to initialize. Please try refreshing the page. Error: ${err instanceof Error ? err.message : 'Unknown error'}`)
     }
   }, [processAudio])
 

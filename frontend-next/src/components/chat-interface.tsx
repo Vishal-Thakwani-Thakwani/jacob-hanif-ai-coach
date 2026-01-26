@@ -220,6 +220,24 @@ export function ChatInterface({
             content: "This feature requires a Pro subscription. Upgrade to unlock image analysis, Oura integration, and more!",
           },
         ]);
+      } else if (errorMessage.includes("Network error") || errorMessage.includes("Failed to fetch")) {
+        // Network connectivity issue
+        console.error("Network error - Backend URL:", process.env.NEXT_PUBLIC_BACKEND_URL);
+        onMessagesChange([
+          ...updatedMessages,
+          {
+            role: "assistant",
+            content: "Unable to connect to the server. Please check your internet connection and try again.",
+          },
+        ]);
+      } else if (errorMessage.includes("Not authenticated")) {
+        onMessagesChange([
+          ...updatedMessages,
+          {
+            role: "assistant",
+            content: "Your session has expired. Please refresh the page and sign in again.",
+          },
+        ]);
       } else {
         onMessagesChange([
           ...updatedMessages,
