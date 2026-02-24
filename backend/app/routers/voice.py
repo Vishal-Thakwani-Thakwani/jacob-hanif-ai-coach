@@ -1,24 +1,27 @@
 """
 Voice call endpoint using OpenAI Whisper (STT) and ElevenLabs (TTS).
 """
-from fastapi import APIRouter, HTTPException, Depends, UploadFile, File
+from fastapi import APIRouter, HTTPException, Depends, UploadFile, File, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 import httpx
 import tempfile
 import os
 from openai import OpenAI
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from app.core.config import settings
 from app.core.auth import get_user_with_profile
 
 router = APIRouter()
+limiter = Limiter(key_func=get_remote_address)
 
 
 class VoiceRequest(BaseModel):
-    text: str
-    voice_id: Optional[str] = None  # Override default voice
+    text: str = Field(..., max_length=1000)
+    voice_id: Optional[str] = None
 
 
 class TranscriptionResponse(BaseModel):
@@ -27,7 +30,9 @@ class TranscriptionResponse(BaseModel):
 
 
 @router.post("/voice/transcribe", response_model=TranscriptionResponse)
+@limiter.limit("15/minute")
 async def transcribe_audio(
+    request: Request,
     audio: UploadFile = File(...),
     user: dict = Depends(get_user_with_profile)
 ):
@@ -86,8 +91,10 @@ async def transcribe_audio(
 
 
 @router.post("/voice/synthesize")
+@limiter.limit("15/minute")
 async def synthesize_voice(
-    request: VoiceRequest,
+    request: Request,
+    voice_request: VoiceRequest,
     user: dict = Depends(get_user_with_profile)
 ):
     """
@@ -109,9 +116,8 @@ async def synthesize_voice(
     if not settings.elevenlabs_api_key:
         raise HTTPException(status_code=500, detail="ElevenLabs API key not configured")
     
-    voice_id = request.voice_id or settings.elevenlabs_voice_id
+    voice_id = voice_request.voice_id or settings.elevenlabs_voice_id
     
-    # ElevenLabs API endpoint
     url = f"https://api.elevenlabs.io/v1/text-to-speech/{voice_id}/stream"
     
     headers = {
@@ -121,7 +127,7 @@ async def synthesize_voice(
     }
     
     payload = {
-        "text": request.text,
+        "text": voice_request.text,
         "model_id": "eleven_turbo_v2_5",
         "voice_settings": {
             "stability": 0.5,

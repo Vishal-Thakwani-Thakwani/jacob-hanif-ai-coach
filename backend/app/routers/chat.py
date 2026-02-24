@@ -70,10 +70,10 @@ def _build_wearable_context(whoop_data: dict | None, oura_data: dict | None) -> 
     return "\n".join(parts) if parts else ""
 
 
-def _build_progress_context() -> str:
+def _build_progress_context(user_id: str = "default") -> str:
     """Build context string from historical progress data."""
     try:
-        summary = db.get_user_progress_summary()
+        summary = db.get_user_progress_summary(user_id)
         parts = []
         
         # Oura trends
@@ -212,17 +212,22 @@ User's Recovery Data (from Oura Ring):
         docs = retriever.invoke(search_query)
         context = "\n\n---\n\n".join(doc.page_content for doc in docs)
     
-    # 4. Build messages with system prompt + history + new message
+    # 4. Build training progress context
+    progress_context = ""
+    if _is_coaching_question(request.message) or has_image:
+        progress_context = _build_progress_context(user_id)
+    
+    # 5. Build messages with system prompt + history + new message
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     
-    # Add chat history
     for msg in history:
         messages.append({"role": msg["role"], "content": msg["content"]})
     
-    # Add current user message with context
     user_content = request.message
     if oura_context:
         user_content += f"\n\n[User's Oura Data: {oura_context}]"
+    if progress_context:
+        user_content += f"\n\n[User's Training Progress: {progress_context}]"
     if context:
         user_content += f"\n\n[Relevant training content: {context}]"
     messages.append({"role": "user", "content": user_content})
