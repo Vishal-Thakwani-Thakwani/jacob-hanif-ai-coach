@@ -236,19 +236,7 @@ export default function CallPage() {
 
   const startCall = async () => {
     // iOS Safari audio unlock hack
-    try {
-      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-      if (AudioContextClass) {
-        const audioCtx = new AudioContextClass();
-        const buffer = audioCtx.createBuffer(1, 1, 22050);
-        const source = audioCtx.createBufferSource();
-        source.buffer = buffer;
-        source.connect(audioCtx.destination);
-        source.start(0);
-      }
-    } catch (e) {
-      console.warn('Silent audio playback failed', e);
-    }
+    if (audioRef.current) { audioRef.current.play().catch(() => {}); }
 
     setCallState('starting')
     setError(null)
