@@ -150,7 +150,12 @@ async def chat_stream(
     has_image = bool(request.image_b64)
     is_pro = user.get("is_pro", False)
     
-    # Block image uploads for free users
+    import re
+    _is_valid_uuid = bool(conversation_id and re.match(
+        r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
+        conversation_id, re.IGNORECASE
+    ))
+    
     if has_image and not is_pro:
         raise HTTPException(
             status_code=403,
@@ -161,19 +166,21 @@ async def chat_stream(
             }
         )
     
-    # Get Supabase client
     supabase = get_supabase()
     
-    # 1. CHAT MEMORY: Fetch last 10 messages for context
+    # Fetch chat history only if conversation_id is a valid UUID (Supabase-managed)
     history = []
-    if conversation_id:
-        result = supabase.table("messages") \
-            .select("role, content") \
-            .eq("conversation_id", conversation_id) \
-            .order("created_at", desc=True) \
-            .limit(10) \
-            .execute()
-        history = list(reversed(result.data)) if result.data else []
+    if _is_valid_uuid:
+        try:
+            result = supabase.table("messages") \
+                .select("role, content") \
+                .eq("conversation_id", conversation_id) \
+                .order("created_at", desc=True) \
+                .limit(10) \
+                .execute()
+            history = list(reversed(result.data)) if result.data else []
+        except Exception:
+            history = []
     
     # 2. Get Oura context FROM DATABASE (Pro only)
     oura_context = ""
@@ -247,14 +254,17 @@ User's Recovery Data (from Oura Ring):
                     full_response += token
                     yield f"data: {json.dumps({'token': token})}\n\n"
             
-            # 5. PERSISTENCE: Backend saves assistant message
-            if conversation_id and user_id:
-                supabase.table("messages").insert({
-                    "conversation_id": conversation_id,
-                    "user_id": user_id,
-                    "role": "assistant",
-                    "content": full_response,
-                }).execute()
+            # Save to Supabase only if conversation_id is a valid UUID
+            if _is_valid_uuid and user_id:
+                try:
+                    supabase.table("messages").insert({
+                        "conversation_id": conversation_id,
+                        "user_id": user_id,
+                        "role": "assistant",
+                        "content": full_response,
+                    }).execute()
+                except Exception:
+                    pass
             
             # 6. INCREMENT USAGE: Track message count for free users
             increment_usage(supabase, user_id, "message_count")
