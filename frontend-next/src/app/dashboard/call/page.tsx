@@ -217,8 +217,8 @@ export default function CallPage() {
         },
         positiveSpeechThreshold: 0.8,
         negativeSpeechThreshold: 0.5,
-        redemptionFrames: 8,
-        minSpeechFrames: 4,
+        redemptionMs: 500,
+        minSpeechMs: 250,
       })
       
       vadRef.current = vad
