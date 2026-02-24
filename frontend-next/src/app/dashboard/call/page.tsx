@@ -169,15 +169,20 @@ export default function CallPage() {
         throw new Error(`Voice synthesis failed: ${errorText}`)
       }
 
-      // Play audio
-      const audioBlob = await response.blob()
+      const arrayBuffer = await response.arrayBuffer()
+      const audioBlob = new Blob([arrayBuffer], { type: 'audio/mpeg' })
       const audioUrl = URL.createObjectURL(audioBlob)
       
       if (audioRef.current) {
         audioRef.current.src = audioUrl
         audioRef.current.onended = () => {
           URL.revokeObjectURL(audioUrl)
-          // Resume VAD listening after Jacob finishes
+          setCallState('listening')
+          vadRef.current?.start()
+        }
+        audioRef.current.onerror = () => {
+          URL.revokeObjectURL(audioUrl)
+          console.error('Audio playback error')
           setCallState('listening')
           vadRef.current?.start()
         }
