@@ -85,7 +85,9 @@ def test_chat_rag_quality(base: str):
 
 def test_voice_synthesize_api():
     """Test ElevenLabs API directly (no auth needed)."""
-    api_key = os.environ.get("ELEVENLABS_API_KEY", "sk_70a1d2103e8d8f6938bd336f10c6db49da5c0c2e6da75501")
+    api_key = os.environ.get("ELEVENLABS_API_KEY")
+    if not api_key:
+        raise RuntimeError("ELEVENLABS_API_KEY env var required")
     voice_id = "o3uVEWMvjriqkdpLxRL6"
 
     r = httpx.post(

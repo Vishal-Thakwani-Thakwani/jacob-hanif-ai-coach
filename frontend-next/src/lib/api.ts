@@ -56,10 +56,6 @@ export async function* streamMessage(
   imageType?: string
 ): AsyncGenerator<string, void, unknown> {
   const backendUrl = BACKEND_URL;
-  console.log("streamMessage called");
-  console.log("  Backend URL:", backendUrl);
-  console.log("  Has access token:", !!accessToken);
-  console.log("  Token preview:", accessToken ? accessToken.substring(0, 20) + "..." : "none");
   
   let response: Response;
   try {
@@ -69,7 +65,6 @@ export async function* streamMessage(
       image_b64: imageB64,
       image_type: imageType,
     };
-    console.log("  Request body:", { ...requestBody, image_b64: imageB64 ? "[base64 data]" : undefined });
     
     response = await fetch(`${backendUrl}/chat/stream`, {
       method: "POST",
@@ -80,16 +75,11 @@ export async function* streamMessage(
       body: JSON.stringify(requestBody),
     });
   } catch (fetchError) {
-    console.error("Fetch failed:", fetchError);
-    console.error("  Error type:", fetchError instanceof TypeError ? "TypeError (likely CORS or network)" : typeof fetchError);
     throw new Error(`Network error: ${fetchError instanceof Error ? fetchError.message : 'Failed to connect to server'}`);
   }
 
-  console.log("Response received, status:", response.status);
-
   if (!response.ok) {
     const errorText = await response.text();
-    console.error("API error:", response.status, errorText);
     throw new Error(`Chat failed: ${response.status} - ${errorText}`);
   }
 

@@ -13,7 +13,13 @@ app = FastAPI(title="Jacob Hanif AI Coach")
 # Allow CORS for local development
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=[
+        "https://www.jacobcoach.website",
+        "https://jacobcoach.website",
+        "https://jacob-hanif-ai-coach.vercel.app",
+        "http://localhost:3000",
+        "http://localhost:3001",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

@@ -6,7 +6,10 @@ import type { CookieOptions } from '@supabase/ssr'
 export async function GET(request: Request) {
   const { searchParams, origin } = new URL(request.url)
   const code = searchParams.get('code')
-  const next = searchParams.get('next') ?? '/dashboard'
+  let next = searchParams.get('next') ?? '/dashboard'
+  if (!next.startsWith('/') || next.startsWith('//')) {
+    next = '/dashboard'
+  }
 
   const baseUrl = process.env.NEXT_PUBLIC_APP_URL || origin
 

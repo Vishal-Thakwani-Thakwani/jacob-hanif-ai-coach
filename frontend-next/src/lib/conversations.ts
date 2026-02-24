@@ -49,7 +49,7 @@ export function saveConversations(conversations: Conversation[]): void {
 
 export function createConversation(title: string): Conversation {
   return {
-    id: Date.now().toString(),
+    id: crypto.randomUUID(),
     title: title || "New Chat",
     timestamp: Date.now(),
     messages: [],

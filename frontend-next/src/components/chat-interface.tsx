@@ -13,6 +13,7 @@ import { streamMessage, OuraData } from "@/lib/api";
 import { Message } from "@/lib/conversations";
 import { createClient } from "@/lib/supabase/client";
 import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 
 interface UsageInfo {
   used: number;
@@ -74,7 +75,24 @@ export function ChatInterface({
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, streamingContent]);
 
-  // Handle paste events for images (Command+V)
+  const compressImage = (file: File): Promise<{ base64: string; type: string }> => {
+    return new Promise((resolve) => {
+      const img = new window.Image();
+      img.onload = () => {
+        const canvas = document.createElement("canvas");
+        const maxWidth = 1024;
+        const scale = Math.min(1, maxWidth / img.width);
+        canvas.width = img.width * scale;
+        canvas.height = img.height * scale;
+        const ctx = canvas.getContext("2d")!;
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+        const dataUrl = canvas.toDataURL("image/jpeg", 0.7);
+        resolve({ base64: dataUrl.split(",")[1], type: "image/jpeg" });
+      };
+      img.src = URL.createObjectURL(file);
+    });
+  };
+
   const handlePaste = (e: React.ClipboardEvent) => {
     const items = e.clipboardData?.items;
     if (!items) return;
@@ -84,15 +102,11 @@ export function ChatInterface({
         e.preventDefault();
         const file = item.getAsFile();
         if (file && usage.is_pro) {
-          const reader = new FileReader();
-          reader.onload = () => {
-            const base64 = (reader.result as string).split(",")[1];
+          compressImage(file).then(({ base64, type }) => {
             setSelectedImage(base64);
-            setImageType(file.type);
-          };
-          reader.readAsDataURL(file);
+            setImageType(type);
+          });
         } else if (!usage.is_pro) {
-          // Show message that image upload is Pro only
           alert("Image upload is a Pro feature. Upgrade to analyze your form!");
         }
         break;
@@ -103,13 +117,10 @@ export function ChatInterface({
   const handleImageUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (file) {
-      const reader = new FileReader();
-      reader.onload = () => {
-        const base64 = (reader.result as string).split(",")[1];
+      compressImage(file).then(({ base64, type }) => {
         setSelectedImage(base64);
-        setImageType(file.type);
-      };
-      reader.readAsDataURL(file);
+        setImageType(type);
+      });
     }
   };
 
@@ -335,7 +346,7 @@ export function ChatInterface({
                   )}
                   {message.role === "assistant" ? (
                     <div className="prose prose-sm dark:prose-invert max-w-none">
-                      <ReactMarkdown>{message.content}</ReactMarkdown>
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{message.content}</ReactMarkdown>
                     </div>
                   ) : (
                     <p className="whitespace-pre-wrap">{message.content}</p>
@@ -362,7 +373,7 @@ export function ChatInterface({
                 <Card className="max-w-[80%] p-4 bg-muted">
                   {streamingContent ? (
                     <div className="prose prose-sm dark:prose-invert max-w-none">
-                      <ReactMarkdown>{streamingContent}</ReactMarkdown>
+                      <ReactMarkdown remarkPlugins={[remarkGfm]}>{streamingContent}</ReactMarkdown>
                       <span className="inline-block w-2 h-4 bg-primary animate-pulse ml-1" />
                     </div>
                   ) : (

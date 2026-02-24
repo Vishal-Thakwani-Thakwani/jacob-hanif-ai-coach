@@ -1,21 +1,19 @@
-fastapi
-uvicorn[standard]
-python-dotenv
-pydantic-settings
-python-multipart
+fastapi==0.133.0
+uvicorn[standard]==0.41.0
+python-dotenv==1.2.1
+pydantic-settings==2.13.1
+python-multipart==0.0.22
 
-langchain
-langchain-community
-langchain-text-splitters
-langchain-openai
-chromadb
-pypdf
-docx2txt
-openai
-streamlit
-requests
+langchain==1.2.10
+langchain-community==0.4.1
+langchain-text-splitters==1.1.1
+langchain-openai==1.1.10
+chromadb==1.5.1
+pypdf==6.7.2
+docx2txt==0.9
+openai==2.23.0
+requests==2.32.5
 
-# Auth & Database
-supabase
-python-jose[cryptography]
-httpx
+supabase==2.28.0
+python-jose[cryptography]==3.5.0
+httpx==0.28.1

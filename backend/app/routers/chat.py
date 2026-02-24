@@ -168,13 +168,13 @@ async def chat_stream(
     
     supabase = get_supabase()
     
-    # Fetch chat history only if conversation_id is a valid UUID (Supabase-managed)
     history = []
     if _is_valid_uuid:
         try:
             result = supabase.table("messages") \
                 .select("role, content") \
                 .eq("conversation_id", conversation_id) \
+                .eq("user_id", user_id) \
                 .order("created_at", desc=True) \
                 .limit(10) \
                 .execute()
@@ -224,7 +224,7 @@ User's Recovery Data (from Oura Ring):
     if oura_context:
         user_content += f"\n\n[User's Oura Data: {oura_context}]"
     if context:
-        user_content += f"\n\n[Relevant training content: {context[:2000]}]"
+        user_content += f"\n\n[Relevant training content: {context}]"
     messages.append({"role": "user", "content": user_content})
     
     # Choose model
@@ -319,10 +319,9 @@ async def get_usage(user: dict = Depends(get_user_with_profile)):
     }
 
 
-# Keep the original non-streaming endpoint for backwards compatibility
 @router.post("/chat", response_model=ChatResponse)
-def chat(request: ChatRequest) -> ChatResponse:
-    """Non-streaming chat endpoint (for backwards compatibility)."""
+def chat(request: ChatRequest, user: dict = Depends(check_message_limit)) -> ChatResponse:
+    """Non-streaming chat endpoint."""
     if not settings.openai_api_key:
         raise HTTPException(status_code=400, detail="OPENAI_API_KEY not set.")
 

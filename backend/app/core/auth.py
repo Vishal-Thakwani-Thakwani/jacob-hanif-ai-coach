@@ -135,22 +135,7 @@ async def get_current_user(authorization: Optional[str] = Header(None)) -> dict:
         return payload
         
     except JWTError as e:
-        print(f"JWT verification failed: {str(e)}")
-        # Try without audience verification as fallback
-        try:
-            signing_key, alg = get_signing_key(token)
-            public_key = jwk.construct(signing_key)
-            payload = jwt.decode(
-                token,
-                public_key,
-                algorithms=[alg],
-                options={"verify_aud": False}
-            )
-            print(f"Token verified (no aud) for user: {payload.get('sub')}")
-            return payload
-        except JWTError as e2:
-            print(f"JWT verification failed (fallback): {str(e2)}")
-            raise HTTPException(status_code=401, detail=f"Invalid token: {str(e)}")
+        raise HTTPException(status_code=401, detail=f"Invalid token: {str(e)}")
 
 
 def get_daily_usage(supabase: Client, user_id: str) -> dict:
