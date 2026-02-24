@@ -235,13 +235,28 @@ export default function CallPage() {
   }, [processAudio])
 
   const startCall = async () => {
+    // iOS Safari audio unlock hack
+    try {
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      if (AudioContextClass) {
+        const audioCtx = new AudioContextClass();
+        const buffer = audioCtx.createBuffer(1, 1, 22050);
+        const source = audioCtx.createBufferSource();
+        source.buffer = buffer;
+        source.connect(audioCtx.destination);
+        source.start(0);
+      }
+    } catch (e) {
+      console.warn('Silent audio playback failed', e);
+    }
+
     setCallState('starting')
     setError(null)
     setTranscript('')
     setJacobResponse('')
     
     // Generate conversation ID for this call session
-    const callId = `call_${Date.now()}`
+    const callId = crypto.randomUUID()
     setConversationId(callId)
     
     try {
