@@ -262,14 +262,22 @@ User's Recovery Data (from Oura Ring):
             # Save to Supabase only if conversation_id is a valid UUID
             if _is_valid_uuid and user_id:
                 try:
-                    supabase.table("messages").insert({
-                        "conversation_id": conversation_id,
-                        "user_id": user_id,
-                        "role": "assistant",
-                        "content": full_response,
-                    }).execute()
-                except Exception:
-                    pass
+                    supabase.table("messages").insert([
+                        {
+                            "conversation_id": conversation_id,
+                            "user_id": user_id,
+                            "role": "user",
+                            "content": request.message,
+                        },
+                        {
+                            "conversation_id": conversation_id,
+                            "user_id": user_id,
+                            "role": "assistant",
+                            "content": full_response,
+                        }
+                    ]).execute()
+                except Exception as e:
+                    print(f"Failed to save history: {e}")
             
             # 6. INCREMENT USAGE: Track message count for free users
             increment_usage(supabase, user_id, "message_count")
@@ -330,29 +338,27 @@ def chat(request: ChatRequest, user: dict = Depends(check_message_limit)) -> Cha
     if not settings.openai_api_key:
         raise HTTPException(status_code=400, detail="OPENAI_API_KEY not set.")
 
+    user_id = user.get("sub", "default")
+
     try:
         from openai import OpenAI
         client = OpenAI(api_key=settings.openai_api_key)
         has_image = bool(request.image_b64)
         
-        # Retrieve RAG context for coaching questions or image analysis
         context = ""
         if _is_coaching_question(request.message) or has_image:
             retriever = get_vector_store().as_retriever(search_kwargs={"k": 5})
-            # For images, also search for form-related content
             search_query = request.message
             if has_image:
                 search_query += " form technique position alignment"
             docs = retriever.invoke(search_query)
             context = "\n\n---\n\n".join(doc.page_content for doc in docs)
         
-        # Build wearable context (today's data)
         wearable_context = _build_wearable_context(request.whoop_data, request.oura_data)
         
-        # Build historical progress context from database
         progress_context = ""
         if _is_coaching_question(request.message) or has_image:
-            progress_context = _build_progress_context()
+            progress_context = _build_progress_context(user_id)
         
         # Choose model based on whether we have an image
         model = "gpt-4o" if has_image else settings.openai_model
