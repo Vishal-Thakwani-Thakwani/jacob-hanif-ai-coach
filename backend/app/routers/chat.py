@@ -217,13 +217,14 @@ User's Recovery Data (from Oura Ring):
     if _is_coaching_question(request.message) or has_image:
         progress_context = _build_progress_context(user_id)
     
-    # 5. Build messages with system prompt + history + new message
+    # 4. Build messages with system prompt + history + new message
     messages = [{"role": "system", "content": SYSTEM_PROMPT}]
     
+    # Add chat history (convert roles to match OpenAI API: 'user' or 'assistant')
     for msg in history:
         messages.append({"role": msg["role"], "content": msg["content"]})
     
-    user_content = request.message
+    # Add current user message with context
     if oura_context:
         user_content += f"\n\n[User's Oura Data: {oura_context}]"
     if progress_context:
@@ -259,9 +260,15 @@ User's Recovery Data (from Oura Ring):
                     full_response += token
                     yield f"data: {json.dumps({'token': token})}\n\n"
             
-            # Save to Supabase only if conversation_id is a valid UUID
             if _is_valid_uuid and user_id:
                 try:
+                    # Ensure conversation exists (upsert to avoid FK violation)
+                    supabase.table("conversations").upsert({
+                        "id": conversation_id,
+                        "user_id": user_id,
+                        "title": request.message[:50],
+                    }, on_conflict="id").execute()
+
                     supabase.table("messages").insert([
                         {
                             "conversation_id": conversation_id,
