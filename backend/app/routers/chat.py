@@ -224,13 +224,25 @@ User's Recovery Data (from Oura Ring):
         messages.append({"role": msg["role"], "content": msg["content"]})
     
     # Add current user message with context
+    user_content = request.message
     if oura_context:
         user_content += f"\n\n[User's Oura Data: {oura_context}]"
     if progress_context:
         user_content += f"\n\n[User's Training Progress: {progress_context}]"
     if context:
         user_content += f"\n\n[Relevant training content: {context}]"
-    messages.append({"role": "user", "content": user_content})
+
+    if has_image and request.image_b64:
+        img_type = request.image_type or "image/jpeg"
+        messages.append({
+            "role": "user",
+            "content": [
+                {"type": "text", "text": user_content},
+                {"type": "image_url", "image_url": {"url": f"data:{img_type};base64,{request.image_b64}"}},
+            ],
+        })
+    else:
+        messages.append({"role": "user", "content": user_content})
     
     # Choose model
     model = "gpt-4o" if has_image else settings.openai_model
