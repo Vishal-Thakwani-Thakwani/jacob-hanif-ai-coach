@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any, Optional
 
 # Database file location
-DB_PATH = Path(__file__).parent.parent.parent.parent / "data" / "user_metrics.db"
+DB_PATH = Path(__file__).parent.parent.parent / "data" / "user_metrics.db"
 
 
 def get_db_path() -> Path:

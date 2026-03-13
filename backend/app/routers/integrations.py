@@ -4,9 +4,10 @@ from datetime import date, datetime, timedelta
 from typing import List, Optional
 
 import requests
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
+from ..core.auth import get_user_with_profile, get_supabase
 from ..db import database as db
 
 
@@ -51,7 +52,7 @@ class SyncResponse(BaseModel):
 # --- Whoop Integration ---
 
 @router.post("/whoop/sync", response_model=SyncResponse)
-def sync_whoop(request: WhoopSyncRequest) -> SyncResponse:
+async def sync_whoop(request: WhoopSyncRequest, user: dict = Depends(get_user_with_profile)) -> SyncResponse:
     """
     Sync recovery data from Whoop API.
     
@@ -128,7 +129,7 @@ def sync_whoop(request: WhoopSyncRequest) -> SyncResponse:
 # --- Oura Integration ---
 
 @router.post("/oura/sync", response_model=SyncResponse)
-def sync_oura(request: OuraSyncRequest) -> SyncResponse:
+async def sync_oura(request: OuraSyncRequest, user: dict = Depends(get_user_with_profile)) -> SyncResponse:
     """
     Sync readiness and sleep data from Oura API.
     
@@ -208,7 +209,9 @@ def sync_oura(request: OuraSyncRequest) -> SyncResponse:
         
         latest["synced_at"] = datetime.utcnow().isoformat()
         
-        # Store in database for historical tracking
+        user_id = user.get("sub", "default")
+        
+        # Store in SQLite for historical tracking
         try:
             db.upsert_oura_daily(
                 date_val=yesterday,
@@ -221,10 +224,30 @@ def sync_oura(request: OuraSyncRequest) -> SyncResponse:
                 sleep_efficiency=latest.get("sleep_efficiency"),
                 sleep_latency=latest.get("sleep_latency"),
                 body_temperature=latest.get("body_temperature"),
+                user_id=user_id,
             )
         except Exception as db_err:
-            # Log but don't fail - data is still returned
-            print(f"Warning: Failed to store Oura data in DB: {db_err}")
+            print(f"Warning: Failed to store Oura data in SQLite: {db_err}")
+
+        # Also write to Supabase so chat_stream can read Oura context
+        try:
+            supabase = get_supabase()
+            supabase.table("oura_daily").upsert({
+                "user_id": user_id,
+                "date": str(yesterday),
+                "readiness_score": latest.get("readiness_score"),
+                "sleep_score": latest.get("sleep_score"),
+                "activity_score": latest.get("activity_score"),
+                "hrv_balance": latest.get("hrv_balance"),
+                "steps": latest.get("steps"),
+                "active_calories": latest.get("active_calories"),
+                "resting_heart_rate": latest.get("resting_heart_rate"),
+                "body_temperature": latest.get("body_temperature"),
+                "sleep_efficiency": latest.get("sleep_efficiency"),
+                "sleep_latency": latest.get("sleep_latency"),
+            }, on_conflict="user_id,date").execute()
+        except Exception as supa_err:
+            print(f"Warning: Failed to store Oura data in Supabase: {supa_err}")
         
         return SyncResponse(
             success=True,
@@ -241,7 +264,7 @@ def sync_oura(request: OuraSyncRequest) -> SyncResponse:
 # --- Historical data for rolling averages ---
 
 @router.post("/oura/history", response_model=SyncResponse)
-def get_oura_history(request: OuraSyncRequest) -> SyncResponse:
+async def get_oura_history(request: OuraSyncRequest, user: dict = Depends(get_user_with_profile)) -> SyncResponse:
     """
     Fetch 7 days of Oura data for rolling average calculations.
     """
@@ -349,6 +372,7 @@ def get_oura_history(request: OuraSyncRequest) -> SyncResponse:
                     averages["hrv_trend"] = "stable"
         
         # Store all historical data in database
+        user_id = user.get("sub", "default")
         for record in history["readiness"]:
             try:
                 hrv_val = None
@@ -424,7 +448,7 @@ class TrainingStatsResponse(BaseModel):
 
 
 @router.post("/training/log", response_model=TrainingLogResponse)
-def add_training_log(request: TrainingLogRequest) -> TrainingLogResponse:
+async def add_training_log(request: TrainingLogRequest, user: dict = Depends(get_user_with_profile)) -> TrainingLogResponse:
     """
     Log a training session.
     
@@ -438,6 +462,7 @@ def add_training_log(request: TrainingLogRequest) -> TrainingLogResponse:
         if request.date:
             date_val = datetime.strptime(request.date, "%Y-%m-%d").date()
         
+        user_id = user.get("sub", "default")
         log_id = db.add_training_log(
             exercise=request.exercise,
             metric_type=request.metric_type,
@@ -445,6 +470,7 @@ def add_training_log(request: TrainingLogRequest) -> TrainingLogResponse:
             date_val=date_val,
             sets=request.sets,
             notes=request.notes,
+            user_id=user_id,
         )
         
         return TrainingLogResponse(
@@ -457,55 +483,59 @@ def add_training_log(request: TrainingLogRequest) -> TrainingLogResponse:
 
 
 @router.get("/training/stats/{exercise}/{metric_type}", response_model=TrainingStatsResponse)
-def get_training_stats(exercise: str, metric_type: str) -> TrainingStatsResponse:
+async def get_training_stats(exercise: str, metric_type: str, user: dict = Depends(get_user_with_profile)) -> TrainingStatsResponse:
     """
     Get rolling averages and trend for a specific exercise metric.
     """
     try:
+        user_id = user.get("sub", "default")
         return TrainingStatsResponse(
             exercise=exercise,
             metric_type=metric_type,
-            weekly_avg=db.get_training_rolling_average(exercise, metric_type, 7),
-            biweekly_avg=db.get_training_rolling_average(exercise, metric_type, 14),
-            trend=db.get_training_trend(exercise, metric_type),
+            weekly_avg=db.get_training_rolling_average(exercise, metric_type, 7, user_id),
+            biweekly_avg=db.get_training_rolling_average(exercise, metric_type, 14, user_id),
+            trend=db.get_training_trend(exercise, metric_type, user_id),
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/training/exercises")
-def list_exercises():
+async def list_exercises(user: dict = Depends(get_user_with_profile)):
     """Get list of all exercises the user has logged."""
-    return {"exercises": db.get_all_training_exercises()}
+    user_id = user.get("sub", "default")
+    return {"exercises": db.get_all_training_exercises(user_id)}
 
 
 @router.get("/progress/summary")
-def get_progress_summary():
+async def get_progress_summary(user: dict = Depends(get_user_with_profile)):
     """
     Get comprehensive progress summary for AI coaching.
     Includes Oura trends, training trends, and analysis flags.
     """
     try:
-        summary = db.get_user_progress_summary()
+        user_id = user.get("sub", "default")
+        summary = db.get_user_progress_summary(user_id)
         return {"success": True, "summary": summary}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
 
 @router.get("/oura/averages")
-def get_oura_averages():
+async def get_oura_averages(user: dict = Depends(get_user_with_profile)):
     """
     Get Oura rolling averages from stored historical data.
     """
     try:
+        user_id = user.get("sub", "default")
         return {
             "success": True,
-            "weekly": db.get_oura_rolling_averages(7),
-            "biweekly": db.get_oura_rolling_averages(14),
+            "weekly": db.get_oura_rolling_averages(7, user_id),
+            "biweekly": db.get_oura_rolling_averages(14, user_id),
             "trends": {
-                "readiness": db.get_oura_trend("readiness_score"),
-                "sleep": db.get_oura_trend("sleep_score"),
-                "hrv": db.get_oura_trend("hrv_balance"),
+                "readiness": db.get_oura_trend("readiness_score", user_id),
+                "sleep": db.get_oura_trend("sleep_score", user_id),
+                "hrv": db.get_oura_trend("hrv_balance", user_id),
             }
         }
     except Exception as e:

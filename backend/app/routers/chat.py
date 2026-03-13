@@ -11,7 +11,6 @@ from openai import AsyncOpenAI
 
 from app.core.config import settings
 from app.core.auth import (
-    require_subscription, 
     get_supabase, 
     check_message_limit, 
     get_user_with_profile,
