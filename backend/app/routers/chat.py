@@ -1,24 +1,26 @@
 from __future__ import annotations
 
+import re
 from typing import Optional
 import json
 import asyncio
 
-from fastapi import APIRouter, HTTPException, Depends
+from fastapi import APIRouter, HTTPException, Depends, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from openai import AsyncOpenAI
 
 from app.core.config import settings
 from app.core.auth import (
-    get_supabase, 
-    check_message_limit, 
+    get_supabase,
+    check_message_limit,
     get_user_with_profile,
     increment_usage
 )
 from app.rag.prompt import SYSTEM_PROMPT, VISION_PROMPT
 from app.rag.vector_store import get_vector_store
 from app.db import database as db
+from app.core.limiter import limiter
 
 
 router = APIRouter()
@@ -47,14 +49,29 @@ class ChatResponse(BaseModel):
 def _is_coaching_question(message: str) -> bool:
     """Determine if the message is a coaching/fitness question vs casual chat."""
     msg_lower = message.lower().strip()
-    casual_patterns = ["hi", "hey", "hello", "sup", "what's up", "how are you", "thanks", "thank you", "bye", "goodbye"]
-    if any(msg_lower.startswith(p) or msg_lower == p for p in casual_patterns):
+
+    casual_patterns = [
+        "hi", "hey", "hello", "sup", "what's up", "how are you",
+        "thanks", "thank you", "bye", "goodbye", "cheers", "cool",
+        "nice", "ok", "okay", "sure", "yo", "what's good", "lol",
+        "haha", "good morning", "good evening", "good night", "gn",
+        "alright", "sounds good", "gotcha", "nah", "nope", "yep",
+    ]
+    if any(msg_lower == p or msg_lower.startswith(p + " ") or msg_lower.startswith(p + "!")
+           for p in casual_patterns):
         return False
-    fitness_keywords = ["workout", "exercise", "train", "planche", "pullup", "pushup", "muscle", "strength", 
-                        "form", "progression", "routine", "diet", "protein", "recovery", "testosterone",
-                        "debloat", "lean", "fat", "weight", "rep", "set", "hold", "skill", "handstand",
-                        "dip", "row", "core", "ab", "arm", "leg", "back", "chest", "shoulder"]
-    return any(kw in msg_lower for kw in fitness_keywords) or len(message.split()) > 6
+
+    fitness_keywords = [
+        "workout", "exercise", "train", "planche", "pullup", "pushup", "muscle",
+        "strength", "form", "progression", "routine", "diet", "protein", "recovery",
+        "testosterone", "debloat", "lean", "fat", "weight", "rep", "set", "hold",
+        "skill", "handstand", "dip", "row", "core", "ab", "arm", "leg", "back",
+        "chest", "shoulder", "sleep", "oura", "whoop", "hrv", "mobility",
+        "stretch", "flexibility", "program", "plan", "injury", "pain",
+        "ebook", "book", "guide", "blueprint", "stall", "plateau",
+        "nutrition", "calories", "macro", "creatine", "supplement",
+    ]
+    return any(kw in msg_lower for kw in fitness_keywords)
 
 
 def _build_wearable_context(whoop_data: dict | None, oura_data: dict | None) -> str:
@@ -132,7 +149,9 @@ class StreamChatRequest(BaseModel):
 
 
 @router.post("/chat/stream")
+@limiter.limit("30/minute")
 async def chat_stream(
+    request_obj: Request,
     request: StreamChatRequest,
     user: dict = Depends(check_message_limit)
 ):
@@ -149,7 +168,6 @@ async def chat_stream(
     has_image = bool(request.image_b64)
     is_pro = user.get("is_pro", False)
     
-    import re
     _is_valid_uuid = bool(conversation_id and re.match(
         r'^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$',
         conversation_id, re.IGNORECASE
@@ -181,20 +199,32 @@ async def chat_stream(
         except Exception:
             history = []
     
-    # 1b. Cross-session context: pull recent conversation titles so the AI
-    #     has awareness of past interactions with this user
     cross_session_context = ""
     try:
         past_convos = supabase.table("conversations") \
-            .select("title, created_at") \
+            .select("title, id") \
             .eq("user_id", user_id) \
             .order("created_at", desc=True) \
-            .limit(10) \
+            .limit(5) \
             .execute()
         if past_convos.data and len(past_convos.data) > 1:
-            titles = [c["title"] for c in past_convos.data if c.get("title")]
-            if titles:
-                cross_session_context = "Previous conversation topics with this user: " + ", ".join(titles)
+            summaries = []
+            for c in past_convos.data[1:]:
+                last_msg = supabase.table("messages") \
+                    .select("content") \
+                    .eq("conversation_id", c["id"]) \
+                    .eq("role", "user") \
+                    .order("created_at", desc=True) \
+                    .limit(1) \
+                    .execute()
+                if last_msg.data:
+                    summaries.append(
+                        f"- {c.get('title', 'Unknown')}: \"{last_msg.data[0]['content'][:80]}\""
+                    )
+            if summaries:
+                cross_session_context = (
+                    "Previous conversations with this user:\n" + "\n".join(summaries)
+                )
     except Exception:
         pass
 
@@ -233,8 +263,13 @@ User's Recovery Data (from Oura Ring):
     if _is_coaching_question(request.message) or has_image:
         progress_context = _build_progress_context(user_id)
     
-    # 5. Build messages with system prompt + history + new message
     system_content = SYSTEM_PROMPT
+    profile = user.get("profile", {})
+    user_name = profile.get("name") or profile.get("full_name")
+    if user_name:
+        system_content += (
+            f"\n\nThe user's name is {user_name}. Use their name naturally in conversation."
+        )
     if cross_session_context:
         system_content += f"\n\n[{cross_session_context}]"
     messages = [{"role": "system", "content": system_content}]
@@ -293,12 +328,19 @@ User's Recovery Data (from Oura Ring):
             
             if _is_valid_uuid and user_id:
                 try:
-                    # Ensure conversation exists (upsert to avoid FK violation)
-                    supabase.table("conversations").upsert({
-                        "id": conversation_id,
-                        "user_id": user_id,
-                        "title": request.message[:50],
-                    }, on_conflict="id").execute()
+                    existing = supabase.table("conversations") \
+                        .select("id").eq("id", conversation_id).execute()
+
+                    if not existing.data:
+                        supabase.table("conversations").insert({
+                            "id": conversation_id,
+                            "user_id": user_id,
+                            "title": request.message[:50],
+                        }).execute()
+                    else:
+                        supabase.table("conversations").update({
+                            "updated_at": "now()",
+                        }).eq("id", conversation_id).execute()
 
                     supabase.table("messages").insert([
                         {

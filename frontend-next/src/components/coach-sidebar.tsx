@@ -1,6 +1,7 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
+import { createClient } from "@/lib/supabase/client";
 import {
   Activity,
   TrendingUp,
@@ -59,14 +60,22 @@ export function CoachSidebar({
   const [ouraToken, setOuraToken] = useState("");
   const [ouraHistory, setOuraHistory] = useState<Record<string, unknown> | null>(null);
   const [isOuraSyncing, setIsOuraSyncing] = useState(false);
+  const [accessToken, setAccessToken] = useState<string | null>(null);
+  const supabase = createClient();
+
+  useEffect(() => {
+    supabase.auth.getSession().then(({ data: { session } }) => {
+      setAccessToken(session?.access_token ?? null);
+    });
+  }, [supabase]);
 
   const handleOuraSync = async () => {
-    if (!ouraToken) return;
+    if (!ouraToken || !accessToken) return;
     setIsOuraSyncing(true);
     try {
       const [todayData, historyData] = await Promise.all([
-        syncOura(ouraToken),
-        syncOuraHistory(ouraToken),
+        syncOura(ouraToken, accessToken),
+        syncOuraHistory(ouraToken, accessToken),
       ]);
       setOuraData(todayData);
       setOuraHistory(historyData);

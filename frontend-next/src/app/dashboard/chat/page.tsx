@@ -31,11 +31,8 @@ export default function ChatPage() {
             .eq('id', user.id)
             .single()
           
-          console.log('Profile fetched:', profile, 'Error:', error)
-          
           if (profile) {
             const status = profile.subscription_status || 'free'
-            console.log('Subscription status:', status, 'isPro:', status === 'active' || status === 'past_due')
             setSubscriptionStatus(status)
             setIsPro(status === 'active' || status === 'past_due')
           }

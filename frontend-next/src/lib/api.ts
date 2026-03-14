@@ -122,13 +122,17 @@ export async function* streamMessage(
  */
 export async function sendMessage(
   message: string,
+  accessToken: string,
   imageB64?: string,
   imageType?: string,
   ouraData?: OuraData
 ): Promise<string> {
   const response = await fetch(`${BACKEND_URL}/chat`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${accessToken}`,
+    },
     body: JSON.stringify({
       message,
       image_b64: imageB64,
@@ -145,11 +149,14 @@ export async function sendMessage(
   return data.answer;
 }
 
-export async function syncOura(accessToken: string): Promise<OuraData> {
+export async function syncOura(ouraToken: string, accessToken: string): Promise<OuraData> {
   const response = await fetch(`${BACKEND_URL}/integrations/oura/sync`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ access_token: accessToken }),
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify({ access_token: ouraToken }),
   });
 
   if (!response.ok) {
@@ -160,14 +167,17 @@ export async function syncOura(accessToken: string): Promise<OuraData> {
   return data.data;
 }
 
-export async function syncOuraHistory(accessToken: string): Promise<{
+export async function syncOuraHistory(ouraToken: string, accessToken: string): Promise<{
   history: Record<string, unknown[]>;
   averages: Record<string, number | string | null>;
 }> {
   const response = await fetch(`${BACKEND_URL}/integrations/oura/history`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ access_token: accessToken }),
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${accessToken}`,
+    },
+    body: JSON.stringify({ access_token: ouraToken }),
   });
 
   if (!response.ok) {
@@ -178,10 +188,13 @@ export async function syncOuraHistory(accessToken: string): Promise<{
   return data.data;
 }
 
-export async function logTraining(log: TrainingLog): Promise<{ log_id: number }> {
+export async function logTraining(log: TrainingLog, accessToken: string): Promise<{ log_id: number }> {
   const response = await fetch(`${BACKEND_URL}/integrations/training/log`, {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: {
+      "Content-Type": "application/json",
+      "Authorization": `Bearer ${accessToken}`,
+    },
     body: JSON.stringify(log),
   });
 
@@ -192,8 +205,10 @@ export async function logTraining(log: TrainingLog): Promise<{ log_id: number }>
   return response.json();
 }
 
-export async function getProgressSummary(): Promise<ProgressSummary> {
-  const response = await fetch(`${BACKEND_URL}/integrations/progress/summary`);
+export async function getProgressSummary(accessToken: string): Promise<ProgressSummary> {
+  const response = await fetch(`${BACKEND_URL}/integrations/progress/summary`, {
+    headers: { "Authorization": `Bearer ${accessToken}` },
+  });
 
   if (!response.ok) {
     throw new Error(`Failed to get progress: ${response.statusText}`);

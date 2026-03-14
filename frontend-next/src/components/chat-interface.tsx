@@ -163,15 +163,11 @@ export function ChatInterface({
 
     try {
       // Get access token from Supabase session
-      const { data: { session }, error: sessionError } = await supabase.auth.getSession();
-      console.log("Session:", session ? "found" : "missing", "Error:", sessionError);
+      const { data: { session } } = await supabase.auth.getSession();
       
       if (!session?.access_token) {
         throw new Error("Not authenticated. Please sign in again.");
       }
-      
-      console.log("Sending message to backend...");
-      console.log("Backend URL:", process.env.NEXT_PUBLIC_BACKEND_URL);
 
       // Stream the response
       let fullContent = "";

@@ -9,14 +9,11 @@ import httpx
 import tempfile
 import os
 from openai import OpenAI
-from slowapi import Limiter
-from slowapi.util import get_remote_address
-
 from app.core.config import settings
 from app.core.auth import get_user_with_profile
+from app.core.limiter import limiter
 
 router = APIRouter()
-limiter = Limiter(key_func=get_remote_address)
 
 
 class VoiceRequest(BaseModel):

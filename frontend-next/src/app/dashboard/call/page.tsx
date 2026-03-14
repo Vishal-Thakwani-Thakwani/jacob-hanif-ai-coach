@@ -4,9 +4,10 @@ import { useState, useRef, useEffect, useCallback } from 'react'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
-import { Phone, PhoneOff, Volume2, Loader2, Mic } from 'lucide-react'
+import { Phone, PhoneOff, Volume2, Loader2, Mic, Crown } from 'lucide-react'
 import { createClient } from '@/lib/supabase/client'
 import Image from 'next/image'
+import Link from 'next/link'
 
 const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000'
 
@@ -20,6 +21,7 @@ export default function CallPage() {
   const [callDuration, setCallDuration] = useState(0)
   const [conversationId, setConversationId] = useState<string | null>(null)
   const [audioLevel, setAudioLevel] = useState(0)
+  const [isPro, setIsPro] = useState<boolean | null>(null)
   
   const vadRef = useRef<any>(null)
   const audioRef = useRef<HTMLAudioElement | null>(null)
@@ -28,6 +30,23 @@ export default function CallPage() {
   const supabase = createClient()
 
   const isCallActive = callState !== 'idle'
+
+  useEffect(() => {
+    async function checkPro() {
+      const { data: { user } } = await supabase.auth.getUser()
+      if (user) {
+        const { data: profile } = await supabase
+          .from('profiles').select('subscription_status').eq('id', user.id).single()
+        setIsPro(
+          profile?.subscription_status === 'active' ||
+          profile?.subscription_status === 'past_due'
+        )
+      } else {
+        setIsPro(false)
+      }
+    }
+    checkPro()
+  }, [supabase])
 
   // Call duration timer
   useEffect(() => {
@@ -489,7 +508,19 @@ export default function CallPage() {
 
         {/* Call Controls */}
         <div className="flex justify-center gap-4">
-          {!isCallActive ? (
+          {isPro === null ? (
+            <Button size="lg" disabled className="gap-2 px-8">
+              <Loader2 className="h-5 w-5 animate-spin" />
+              Loading...
+            </Button>
+          ) : !isCallActive && !isPro ? (
+            <Link href="/pricing">
+              <Button size="lg" className="gap-2 px-8">
+                <Crown className="h-5 w-5" />
+                Upgrade to Pro for Voice Calls
+              </Button>
+            </Link>
+          ) : !isCallActive ? (
             <Button 
               size="lg" 
               onClick={startCall}
