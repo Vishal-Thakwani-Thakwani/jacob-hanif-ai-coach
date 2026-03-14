@@ -16,6 +16,7 @@ export default function ChatPage() {
   const [isPro, setIsPro] = useState(false)
   const [isLoadingProfile, setIsLoadingProfile] = useState(true)
   const [subscriptionStatus, setSubscriptionStatus] = useState<string>('free')
+  const [initialUsage, setInitialUsage] = useState({ used: 0, limit: 5 })
   const supabase = createClient()
 
   // Fetch user subscription status (with cache bypass)
@@ -42,6 +43,27 @@ export default function ChatPage() {
       }
     }
     fetchSubscriptionStatus()
+  }, [supabase])
+
+  useEffect(() => {
+    async function fetchUsage() {
+      const { data: { session } } = await supabase.auth.getSession()
+      if (!session?.access_token) return
+      try {
+        const res = await fetch(
+          `${process.env.NEXT_PUBLIC_BACKEND_URL}/chat/usage`,
+          { headers: { Authorization: `Bearer ${session.access_token}` } }
+        )
+        if (res.ok) {
+          const data = await res.json()
+          setInitialUsage({
+            used: data.usage.messages_used,
+            limit: data.usage.messages_limit || 5,
+          })
+        }
+      } catch { /* backend unreachable, keep defaults */ }
+    }
+    fetchUsage()
   }, [supabase])
 
   // Load conversations from localStorage on mount
@@ -194,6 +216,7 @@ export default function ChatPage() {
           onFirstMessage={handleFirstMessage}
           conversationId={currentConvoId || undefined}
           isPro={isPro}
+          initialUsage={initialUsage}
         />
       </div>
     </div>

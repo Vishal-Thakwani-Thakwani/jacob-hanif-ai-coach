@@ -31,10 +31,10 @@
     "react-markdown": "^10.1.0",
     "remark-gfm": "^4.0.1",
     "stripe": "^20.2.0",
-    "tailwind-merge": "^3.4.0",
-    "vercel": "^50.4.7"
+    "tailwind-merge": "^3.4.0"
   },
   "devDependencies": {
+    "vercel": "^50.4.7",
     "@tailwindcss/postcss": "^4",
     "@types/node": "^20",
     "@types/react": "^19",

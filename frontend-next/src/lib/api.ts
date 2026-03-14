@@ -106,11 +106,13 @@ export async function* streamMessage(
           const parsed = JSON.parse(data);
           if (parsed.token) {
             yield parsed.token;
+          } else if (parsed.done && parsed.usage) {
+            yield JSON.stringify({ done: true, usage: parsed.usage });
           } else if (parsed.error) {
             throw new Error(parsed.error);
           }
-        } catch {
-          // Skip non-JSON lines
+        } catch (e) {
+          if (e instanceof Error && e.message !== "Unexpected end of JSON input") throw e;
         }
       }
     }

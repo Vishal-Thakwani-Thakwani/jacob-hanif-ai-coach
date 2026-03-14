@@ -164,22 +164,11 @@ def get_daily_usage(supabase: Client, user_id: str) -> dict:
 
 def increment_usage(supabase: Client, user_id: str, field: str = "message_count"):
     """Atomically increment a usage counter via Postgres RPC (race-condition safe)."""
-    try:
-        result = supabase.rpc("increment_daily_usage", {
-            "p_user_id": user_id,
-            "p_field": field,
-        }).execute()
-        return result.data[0] if result.data else None
-    except Exception:
-        # Fallback to non-atomic increment if RPC doesn't exist yet
-        today = date.today().isoformat()
-        usage = get_daily_usage(supabase, user_id)
-        current_count = usage.get(field, 0)
-        supabase.table("daily_usage") \
-            .update({field: current_count + 1}) \
-            .eq("user_id", user_id) \
-            .eq("date", today) \
-            .execute()
+    result = supabase.rpc("increment_daily_usage", {
+        "p_user_id": user_id,
+        "p_field": field,
+    }).execute()
+    return result.data[0] if result.data else None
 
 
 async def get_user_with_profile(

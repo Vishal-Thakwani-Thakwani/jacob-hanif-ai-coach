@@ -17,7 +17,7 @@ from app.core.auth import (
     get_user_with_profile,
     increment_usage
 )
-from app.rag.prompt import SYSTEM_PROMPT, VISION_PROMPT
+from app.rag.prompt import SYSTEM_PROMPT
 from app.rag.vector_store import get_vector_store
 from app.db import database as db
 from app.core.limiter import limiter
@@ -25,25 +25,6 @@ from app.core.limiter import limiter
 
 router = APIRouter()
 
-
-class WearableData(BaseModel):
-    recovery_score: Optional[int] = None
-    hrv: Optional[int] = None
-    rhr: Optional[int] = None
-    sleep_score: Optional[int] = None
-    readiness_score: Optional[int] = None
-
-
-class ChatRequest(BaseModel):
-    message: str
-    image_b64: Optional[str] = None
-    image_type: Optional[str] = None  # e.g., "image/jpeg"
-    whoop_data: Optional[dict] = None
-    oura_data: Optional[dict] = None
-
-
-class ChatResponse(BaseModel):
-    answer: str
 
 
 def _is_coaching_question(message: str) -> bool:
@@ -73,17 +54,6 @@ def _is_coaching_question(message: str) -> bool:
     ]
     return any(kw in msg_lower for kw in fitness_keywords)
 
-
-def _build_wearable_context(whoop_data: dict | None, oura_data: dict | None) -> str:
-    """Build context string from wearable data."""
-    parts = []
-    if whoop_data:
-        parts.append(f"Whoop Data - Recovery: {whoop_data.get('recovery_score', 'N/A')}%, "
-                     f"HRV: {whoop_data.get('hrv', 'N/A')}ms, RHR: {whoop_data.get('rhr', 'N/A')}bpm")
-    if oura_data:
-        parts.append(f"Oura Data - Readiness: {oura_data.get('readiness_score', 'N/A')}, "
-                     f"Sleep Score: {oura_data.get('sleep_score', 'N/A')}")
-    return "\n".join(parts) if parts else ""
 
 
 def _build_progress_context(user_id: str = "default") -> str:
@@ -201,25 +171,17 @@ async def chat_stream(
     
     cross_session_context = ""
     try:
-        past_convos = supabase.table("conversations") \
-            .select("title, id") \
-            .eq("user_id", user_id) \
-            .order("created_at", desc=True) \
-            .limit(5) \
-            .execute()
+        past_convos = supabase.rpc(
+            "get_recent_conversations_with_last_message",
+            {"p_user_id": user_id, "p_limit": 5},
+        ).execute()
         if past_convos.data and len(past_convos.data) > 1:
             summaries = []
             for c in past_convos.data[1:]:
-                last_msg = supabase.table("messages") \
-                    .select("content") \
-                    .eq("conversation_id", c["id"]) \
-                    .eq("role", "user") \
-                    .order("created_at", desc=True) \
-                    .limit(1) \
-                    .execute()
-                if last_msg.data:
+                msg = c.get("last_user_message")
+                if msg:
                     summaries.append(
-                        f"- {c.get('title', 'Unknown')}: \"{last_msg.data[0]['content'][:80]}\""
+                        f"- {c.get('title', 'Unknown')}: \"{msg[:80]}\""
                     )
             if summaries:
                 cross_session_context = (
@@ -338,8 +300,9 @@ User's Recovery Data (from Oura Ring):
                             "title": request.message[:50],
                         }).execute()
                     else:
+                        from datetime import datetime, timezone
                         supabase.table("conversations").update({
-                            "updated_at": "now()",
+                            "updated_at": datetime.now(timezone.utc).isoformat(),
                         }).eq("id", conversation_id).execute()
 
                     supabase.table("messages").insert([
@@ -412,92 +375,3 @@ async def get_usage(user: dict = Depends(get_user_with_profile)):
     }
 
 
-@router.post("/chat", response_model=ChatResponse)
-def chat(request: ChatRequest, user: dict = Depends(check_message_limit)) -> ChatResponse:
-    """Non-streaming chat endpoint."""
-    if not settings.openai_api_key:
-        raise HTTPException(status_code=400, detail="OPENAI_API_KEY not set.")
-
-    user_id = user.get("sub", "default")
-
-    try:
-        from openai import OpenAI
-        client = OpenAI(api_key=settings.openai_api_key)
-        has_image = bool(request.image_b64)
-        
-        context = ""
-        if _is_coaching_question(request.message) or has_image:
-            retriever = get_vector_store().as_retriever(search_kwargs={"k": 5})
-            search_query = request.message
-            if has_image:
-                search_query += " form technique position alignment"
-            docs = retriever.invoke(search_query)
-            context = "\n\n---\n\n".join(doc.page_content for doc in docs)
-        
-        wearable_context = _build_wearable_context(request.whoop_data, request.oura_data)
-        
-        progress_context = ""
-        if _is_coaching_question(request.message) or has_image:
-            progress_context = _build_progress_context(user_id)
-        
-        # Choose model based on whether we have an image
-        model = "gpt-4o" if has_image else settings.openai_model
-        
-        # Build the user message content
-        if has_image:
-            # Vision request with image
-            system_prompt = VISION_PROMPT
-            
-            user_content = []
-            
-            # Add the image
-            user_content.append({
-                "type": "image_url",
-                "image_url": {
-                    "url": f"data:{request.image_type or 'image/jpeg'};base64,{request.image_b64}",
-                    "detail": "high"
-                }
-            })
-            
-            # Build text part
-            text_parts = [f"User's question: {request.message}"]
-            if context:
-                text_parts.append(f"\nRelevant training material excerpts:\n{context}")
-            if wearable_context:
-                text_parts.append(f"\nUser's current recovery data:\n{wearable_context}")
-            if progress_context:
-                text_parts.append(f"\nUser's historical progress data:\n{progress_context}")
-            
-            user_content.append({"type": "text", "text": "\n".join(text_parts)})
-            
-            messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": user_content}
-            ]
-        else:
-            # Text-only request
-            system_prompt = SYSTEM_PROMPT
-            
-            text_parts = [f"User message: {request.message}"]
-            if context:
-                text_parts.append(f"\nRelevant excerpts from your training materials:\n{context}")
-            if wearable_context:
-                text_parts.append(f"\nUser's current recovery data:\n{wearable_context}")
-            if progress_context:
-                text_parts.append(f"\nUser's historical progress data:\n{progress_context}")
-            
-            messages = [
-                {"role": "system", "content": system_prompt},
-                {"role": "user", "content": "\n".join(text_parts)}
-            ]
-        
-        response = client.chat.completions.create(
-            model=model,
-            messages=messages,
-            temperature=0.7,
-            max_tokens=2000,
-        )
-        
-        return ChatResponse(answer=response.choices[0].message.content)
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=str(exc)) from exc
