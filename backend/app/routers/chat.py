@@ -181,6 +181,23 @@ async def chat_stream(
         except Exception:
             history = []
     
+    # 1b. Cross-session context: pull recent conversation titles so the AI
+    #     has awareness of past interactions with this user
+    cross_session_context = ""
+    try:
+        past_convos = supabase.table("conversations") \
+            .select("title, created_at") \
+            .eq("user_id", user_id) \
+            .order("created_at", desc=True) \
+            .limit(10) \
+            .execute()
+        if past_convos.data and len(past_convos.data) > 1:
+            titles = [c["title"] for c in past_convos.data if c.get("title")]
+            if titles:
+                cross_session_context = "Previous conversation topics with this user: " + ", ".join(titles)
+    except Exception:
+        pass
+
     # 2. Get Oura context FROM DATABASE (Pro only)
     oura_context = ""
     profile = user.get("profile", {})
@@ -204,7 +221,7 @@ User's Recovery Data (from Oura Ring):
     # 3. Retrieve RAG context for coaching questions
     context = ""
     if _is_coaching_question(request.message) or has_image:
-        retriever = get_vector_store().as_retriever(search_kwargs={"k": 5})
+        retriever = get_vector_store().as_retriever(search_kwargs={"k": 8})
         search_query = request.message
         if has_image:
             search_query += " form technique position alignment"
@@ -216,8 +233,11 @@ User's Recovery Data (from Oura Ring):
     if _is_coaching_question(request.message) or has_image:
         progress_context = _build_progress_context(user_id)
     
-    # 4. Build messages with system prompt + history + new message
-    messages = [{"role": "system", "content": SYSTEM_PROMPT}]
+    # 5. Build messages with system prompt + history + new message
+    system_content = SYSTEM_PROMPT
+    if cross_session_context:
+        system_content += f"\n\n[{cross_session_context}]"
+    messages = [{"role": "system", "content": system_content}]
     
     # Add chat history (convert roles to match OpenAI API: 'user' or 'assistant')
     for msg in history:
