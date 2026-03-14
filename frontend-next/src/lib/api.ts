@@ -190,7 +190,7 @@ export async function syncOuraHistory(ouraToken: string, accessToken: string): P
   return data.data;
 }
 
-export async function logTraining(log: TrainingLog, accessToken: string): Promise<{ log_id: number }> {
+export async function logTraining(log: TrainingLog, accessToken: string): Promise<{ log_id: string }> {
   const response = await fetch(`${BACKEND_URL}/integrations/training/log`, {
     method: "POST",
     headers: {

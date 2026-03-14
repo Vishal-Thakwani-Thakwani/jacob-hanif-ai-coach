@@ -28,17 +28,24 @@ export function loadConversations(): Conversation[] {
 
 export function saveConversations(conversations: Conversation[]): void {
   if (typeof window === "undefined") return;
+
+  const strip = (msgs: Message[], limit?: number) =>
+    (limit ? msgs.slice(-limit) : msgs).map(({ role, content }) => ({
+      role,
+      content: content.length > 5000 ? content.slice(0, 5000) : content,
+    }));
+
   try {
     const toSave = conversations.map((conv) => ({
       ...conv,
-      messages: conv.messages.map(({ role, content }) => ({ role, content })),
+      messages: strip(conv.messages),
     }));
     localStorage.setItem(CONVERSATIONS_KEY, JSON.stringify(toSave));
   } catch {
     try {
       const trimmed = conversations.slice(-10).map((conv) => ({
         ...conv,
-        messages: conv.messages.slice(-20).map(({ role, content }) => ({ role, content })),
+        messages: strip(conv.messages, 20),
       }));
       localStorage.setItem(CONVERSATIONS_KEY, JSON.stringify(trimmed));
     } catch {

@@ -435,7 +435,7 @@ class TrainingLogRequest(BaseModel):
 
 class TrainingLogResponse(BaseModel):
     success: bool
-    log_id: int
+    log_id: str
     message: str
 
 
@@ -457,29 +457,45 @@ async def add_training_log(request: TrainingLogRequest, user: dict = Depends(get
     - Bench press: exercise="bench_press", metric_type="weight", metric_value=140 (kg)
     - Pull-ups: exercise="pullup", metric_type="reps", metric_value=12
     """
+    user_id = user.get("sub", "default")
+    date_val = request.date or str(date.today())
+    if request.date:
+        date_val = request.date
+
+    supabase = get_supabase()
     try:
-        date_val = None
-        if request.date:
-            date_val = datetime.strptime(request.date, "%Y-%m-%d").date()
-        
-        user_id = user.get("sub", "default")
-        log_id = db.add_training_log(
+        result = supabase.table("training_logs").insert({
+            "user_id": user_id,
+            "date": date_val,
+            "exercise": request.exercise,
+            "metric_type": request.metric_type,
+            "metric_value": request.metric_value,
+            "sets": request.sets,
+            "notes": request.notes,
+        }).execute()
+        log_id = result.data[0]["id"] if result.data else "unknown"
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to save training log: {e}")
+
+    try:
+        parsed_date = datetime.strptime(date_val, "%Y-%m-%d").date() if isinstance(date_val, str) else date_val
+        db.add_training_log(
             exercise=request.exercise,
             metric_type=request.metric_type,
             metric_value=request.metric_value,
-            date_val=date_val,
+            date_val=parsed_date,
             sets=request.sets,
             notes=request.notes,
             user_id=user_id,
         )
-        
-        return TrainingLogResponse(
-            success=True,
-            log_id=log_id,
-            message=f"Logged {request.exercise}: {request.metric_value} {request.metric_type}"
-        )
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+    except Exception:
+        pass
+
+    return TrainingLogResponse(
+        success=True,
+        log_id=log_id,
+        message=f"Logged {request.exercise}: {request.metric_value} {request.metric_type}"
+    )
 
 
 @router.get("/training/stats/{exercise}/{metric_type}", response_model=TrainingStatsResponse)
